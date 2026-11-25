@@ -16,9 +16,13 @@ struct A2UIImportSheet: View {
                     ForEach(report.groups, id: \.reason) { group in
                         row(for: group)
                     }
+                    ForEach(UnfixedIssue.counts(report.unfixed), id: \.issue) { found in
+                        unfixedRow(found.issue, count: found.count)
+                    }
                 } header: {
                     Text(report.screens.isEmpty
                          ? "No screen could be made from this A2UI."
+                         : report.groups.isEmpty ? "Some of it doesn't fit as it was written."
                          : "Some of it isn't brought in as it was written.")
                         .textCase(nil)
                 }
@@ -59,6 +63,18 @@ struct A2UIImportSheet: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// What is still wrong with the screens made, and how many things it is said of.
+    private func unfixedRow(_ issue: UnfixedIssue, count: Int) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(issue.title)
+            Spacer(minLength: 8)
+            Text(count, format: .number)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
     }

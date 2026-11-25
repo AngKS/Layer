@@ -129,25 +129,25 @@ extension DesignStore {
     /// it; and a `before` that isn't in the list. Each drawing in the list keeps its index
     /// among the nodes there (`TreeEdit.reordered`).
     @discardableResult
-    func moveLayer(_ id: DesignElement.ID, to list: LayerList, before: DesignElement.ID?) -> Bool {
+    func moveLayer(_ id: UUID, to list: LayerList, before: UUID?) -> Bool {
         moveLayer(id, to: list, landing: before.map(Landing.above) ?? .bottom)
     }
 
     /// Moves a thing to the top of a list: above every row in it, which is the front.
     @discardableResult
-    func moveLayerToTop(_ id: DesignElement.ID, of list: LayerList) -> Bool {
+    func moveLayerToTop(_ id: UUID, of list: LayerList) -> Bool {
         moveLayer(id, to: list, landing: .top)
     }
 
     /// Where a moved row lands in a list, as the panel shows it.
     private enum Landing {
-        case above(DesignElement.ID)
+        case above(UUID)
         case top
         case bottom
     }
 
     /// Read from the tree and its index: a drop in the Layers panel lowers nothing.
-    private func moveLayer(_ id: DesignElement.ID, to list: NodeParent, landing: Landing) -> Bool {
+    private func moveLayer(_ id: UUID, to list: NodeParent, landing: Landing) -> Bool {
         guard let thing = placed(id), thing.node.kind != .drawing, !thing.isLocked,
               let from = parent(of: id), let host = index[id]?.host, host == self.host(of: list),
               let held = children(of: list) else { return false }

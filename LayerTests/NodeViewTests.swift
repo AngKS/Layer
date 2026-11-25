@@ -192,47 +192,6 @@ private struct Picture {
         #expect(free.hasInk(rows: 270, 330, columns: 20, 320))
     }
 
-    /// Every look a node resolves is the one the element it was made from resolves, for each leaf kind: fully
-    /// styled, and as the kind comes, at its usual size.
-    @Test func nodeLooksAreElementLooks() {
-        for kind in ElementKind.allCases where kind != .group && kind != .card {
-            var styled = DesignStore.newElement(kind)
-            styled.tint = RGBColor(hex: 0x123456)
-            styled.fontSize = 21
-            styled.fontWeight = .semibold
-            styled.textColor = RGBColor(hex: 0x654321)
-            styled.textAlignment = .trailing
-            styled.cornerRadius = 7
-            styled.opacity = 0.4
-            styled.borderColor = RGBColor(hex: 0x00FF00)
-            styled.borderWidth = 3
-            styled.hasShadow = true
-            styled.buttonLook = .bordered
-            styled.value = 0.3
-            var plain = DesignStore.newElement(kind)
-            if case .fixed(let size) = kind.spec.size { plain.frame.size = size }
-            for element in [styled, plain] {
-                let node = LayerNode(element: element)
-                let tokens = DesignTokens.standard
-                #expect(node.resolvedTint == element.tint, "\(kind)")
-                #expect(node.resolvedFontSize(tokens: tokens) == element.resolvedFontSize, "\(kind)")
-                #expect(node.resolvedFontWeight == element.resolvedFontWeight, "\(kind)")
-                #expect(node.resolvedTextColor == element.resolvedTextColor, "\(kind)")
-                #expect(node.resolvedCornerRadius(tokens: tokens) == element.resolvedCornerRadius, "\(kind)")
-                #expect(node.resolvedOpacity == element.resolvedOpacity, "\(kind)")
-                #expect(node.resolvedButtonLook == element.resolvedButtonLook, "\(kind)")
-                #expect(node.resolvedValue == element.resolvedValue, "\(kind)")
-                #expect(node.resolvedTextAlignment == element.resolvedTextAlignment, "\(kind)")
-                #expect(node.resolvedBorderWidth == element.resolvedBorderWidth, "\(kind)")
-                #expect(node.resolvedBorderColor == element.resolvedBorderColor, "\(kind)")
-                #expect(node.hasFill == element.hasFill, "\(kind)")
-                #expect(node.hasCornerRadius == element.hasCornerRadius, "\(kind)")
-                #expect(node.hasBorder == element.hasBorder, "\(kind)")
-                #expect(node.style.hasShadow == element.hasShadow, "\(kind)")
-            }
-        }
-    }
-
     @Test func theDesignsTextSizesAreDrawn() {
         var tokens = DesignTokens.standard
         tokens.textSizes.title = 34
@@ -422,6 +381,7 @@ extension HostedWindowSuites {
                 rose = built(path) - start
                 linesRose = zip(board.lines, linesAtStart).map { CanvasWork.nodeViewsBuilt(of: $0) - $1 }
             }
+            print("BENCH node views edits=20 path=\(rose) lines=\(linesRose.reduce(0, +))")
             #expect(rose >= 1, "the views on C's path are drawn again")
             #expect(rose <= 20 * 3 + 10, "root, G and C built over 20 edits: \(rose)")
             #expect(linesRose.allSatisfy { $0 == 0 }, "lines built over 20 edits of C: \(linesRose.reduce(0, +))")

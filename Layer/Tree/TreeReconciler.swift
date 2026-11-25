@@ -60,6 +60,8 @@ struct TreeReconciler: Sendable {
         /// The keys whose generated node this merge wrote (new, or unchanged since its commit), each with the
         /// id it wrote it with. The person's nodes aren't among them: their records stay as they were.
         fileprivate var wrote: [String: UUID] = [:]
+        /// The ids of the nodes this merge wrote: the generator's, as opposed to the person's.
+        var generatedIDs: Set<UUID> { Set(wrote.values) }
         /// The written keys whose node this merge found where the person left it, the person's changed nodes among
         /// them: each is placed again where the commit leaves it, its fields as they were.
         fileprivate var unmoved: Set<String> = []

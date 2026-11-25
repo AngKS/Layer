@@ -17,10 +17,9 @@ struct UndoNameTests {
         var store: DesignStore { model.store }
 
         init() {
-            let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
-            button = model.store.setElements([
-                DesignElement(kind: .button, frame: CGRect(x: 40, y: 300, width: 200, height: 50), text: "One", tint: Theme.accent),
-            ], on: screen)[0]
+            let one = LayerNode.leaf(.button, frame: CGRect(x: 40, y: 300, width: 200, height: 50), text: "One", tint: Theme.accent)
+            let screen = model.store.addFreeScreen([one], origin: CGPoint(x: 100, y: 50), scale: 0.5)
+            button = DesignStore.ElementRef(host: .screen(screen), element: one.id)
             model.store.updateCanvas { $0.snapsToGuides = false }
             model.drags = drags
             undo.groupsByEvent = false
@@ -30,10 +29,9 @@ struct UndoNameTests {
 
         func drag(by dx: CGFloat, findsNewHome: Bool = true) {
             let owner = CanvasDrags.Owner()
-            let (element, placement) = store.resolve(button)!
             for step in 1...3 {
-                drags.moveElement(button, from: element.frame, placement: placement, by: CGSize(width: dx * CGFloat(step) / 3, height: 0), startingAt: .zero, findsNewHome: findsNewHome, owner: owner, model: model) {
-                    drags.moveRule(for: element, placement: placement, on: nil, model: model)
+                drags.moveNode(button, by: CGSize(width: dx * CGFloat(step) / 3, height: 0), startingAt: .zero, findsNewHome: findsNewHome, owner: owner, model: model) { placed in
+                    drags.moveRule(for: placed, model: model)
                 }
             }
             drags.dropElement(button, findsNewHome: findsNewHome, owner: owner, model: model)
@@ -69,9 +67,8 @@ struct UndoNameTests {
         board.undo.groupsByEvent = groupedByEvent
         board.model.selection = .element(board.button)
         let owner = CanvasDrags.Owner()
-        let (element, placement) = board.store.resolve(board.button)!
-        board.drags.moveElement(board.button, from: element.frame, placement: placement, by: CGSize(width: 10, height: 0), startingAt: .zero, owner: owner, model: board.model) {
-            board.drags.moveRule(for: element, placement: placement, on: nil, model: board.model)
+        board.drags.moveNode(board.button, by: CGSize(width: 10, height: 0), startingAt: .zero, owner: owner, model: board.model) { placed in
+            board.drags.moveRule(for: placed, model: board.model)
         }
         #expect(board.undo.undoActionName == "Move")
         #expect(board.model.beginTwist())
@@ -89,7 +86,7 @@ struct UndoNameTests {
 
     @Test func theFormatPanelsChangesAreFormat() {
         let board = Board()
-        board.model.adjusting { board.store.update(board.button) { $0.tint = RGBColor(hex: 0xFF0000) } }
+        board.model.adjusting { board.store.update(board.button.element) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
         #expect(board.undo.undoActionName == "Format")
     }
 }

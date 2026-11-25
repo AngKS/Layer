@@ -117,15 +117,15 @@ enum AssetLibrary {
         Component(id: "stickyNote", name: "Sticky Note", section: "Notes", keywords: ["note", "comment", "annotation", "post-it"], kind: .stickyNote),
     ]
 
-    /// A new element for a component, at its usual size and look.
-    static func element(forComponent id: String) -> DesignElement? {
+    /// A new leaf for a component, at its usual size and look.
+    static func element(forComponent id: String) -> LayerNode? {
         guard let component = components.first(where: { $0.id == id }) else { return nil }
-        var element = DesignStore.newElement(component.kind)
-        if let text = component.text { element.text = text }
-        if let look = component.buttonLook { element.buttonLook = look }
-        if let isOn = component.isOn { element.isOn = isOn }
-        if let radius = component.cornerRadius { element.cornerRadius = radius }
-        return element
+        var node = LayerNode.standard(component.kind)
+        if let text = component.text { node.content.text = text }
+        if let look = component.buttonLook { node.content.buttonLook = look }
+        if let isOn = component.isOn { node.content.isOn = isOn }
+        if let radius = component.cornerRadius { node.style.cornerRadius = radius }
+        return node
     }
 
     // MARK: Wireframes
@@ -828,8 +828,8 @@ private struct AssetTile: View {
 
         case .component(let id):
             labelled(asset.name) {
-                if let element = AssetLibrary.element(forComponent: id) {
-                    ScaledElement(element: element, fitting: CGSize(width: 84, height: 40))
+                if let node = AssetLibrary.element(forComponent: id) {
+                    ScaledElement(node: node, fitting: CGSize(width: 84, height: 40))
                 }
             }
 
@@ -869,15 +869,15 @@ private struct AssetTile: View {
     }
 }
 
-/// An element drawn at its own size, then scaled down to fit.
+/// A leaf drawn at its own size, then scaled down to fit.
 private struct ScaledElement: View {
-    let element: DesignElement
+    let node: LayerNode
     let fitting: CGSize
 
     var body: some View {
-        let size = element.frame.size
+        let size = node.frame.size
         let scale = min(1, fitting.width / max(size.width, 1), fitting.height / max(size.height, 1))
-        ElementView(element: element)
+        ElementView(node: node)
             .frame(width: size.width, height: size.height)
             .scaleEffect(scale)
             .frame(width: size.width * scale, height: size.height * scale)

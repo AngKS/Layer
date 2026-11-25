@@ -264,9 +264,10 @@ struct TreeTargetsTests {
         #expect(board.model.hoverTarget(at: middle, skippingDrawings: true) == board.thing(note.id))
     }
 
-    /// Voice looks through a container's gaps to the things in it, as it did through a group's: a card's padding
-    /// included, which the projection held as a group's gap (fix round 1, I1). A tap there still picks the card.
-    @Test func voiceLooksThroughACardsPaddingAsThroughAnyGap() throws {
+    /// Looking through ink, a container's gap is still the container, a card's padding among them, as a tap there picks
+    /// it: voice sees containers (plan 6, call 7), so the pencil on ink in a gap names the container, not what is behind
+    /// it or the screen (ruling: pointing under ink, Task 6's review).
+    @Test func aCardsPaddingIsTheCardThroughInkToo() throws {
         var card = container(.card, columnLayout(), frame: CGRect(x: 40, y: 200, width: 0, height: 0), fits: true, [fittingText("One")])
         card.padding = LayerNode.Padding(all: 16)
         let behind = leaf(.text, CGRect(x: 0, y: 180, width: 300, height: 120), text: "Behind")
@@ -277,19 +278,41 @@ struct TreeTargetsTests {
         #expect(TreeTargets.leaf(at: padding, in: card.id, content: onItsOwn.store.tree, index: onItsOwn.store.index) == nil)
 
         #expect(onItsOwn.model.hoverTarget(at: padding) == onItsOwn.thing(card.id), "a tap there picks the card")
-        #expect(onItsOwn.model.hoverTarget(at: padding, skippingDrawings: true) == .screen(onItsOwn.screenID))
+        #expect(onItsOwn.model.hoverTarget(at: padding, skippingDrawings: true) == onItsOwn.thing(card.id))
 
         let overSomething = TreeBoard([behind, card])
         #expect(overSomething.shape(behind.id).contains(padding))
-        #expect(overSomething.model.hoverTarget(at: padding, skippingDrawings: true) == overSomething.thing(behind.id))
+        #expect(overSomething.model.hoverTarget(at: padding, skippingDrawings: true) == overSomething.thing(card.id))
 
-        // On the open canvas, off the screen, with nothing beneath, there is nothing to point at.
+        // On the open canvas, off the screen, with nothing beneath, the card is what is there.
         var aside = card
         aside.frame.origin = CGPoint(x: 600, y: 200)
         let floating = TreeBoard([], canvas: [aside])
         let canvasPadding = CGPoint(x: floating.shape(card.id).rect.minX + 8, y: floating.shape(card.id).rect.midY)
         #expect(floating.model.hoverTarget(at: canvasPadding) == floating.thing(card.id))
-        #expect(floating.model.hoverTarget(at: canvasPadding, skippingDrawings: true) == nil)
+        #expect(floating.model.hoverTarget(at: canvasPadding, skippingDrawings: true) == floating.thing(card.id))
+    }
+
+    /// A stroke drawn across a card's padding: what is on top there is the ink, and looking through the ink, as voice
+    /// does, the card under it, not the screen (ruling: pointing under ink, Task 6's review).
+    @Test func inkOverACardsPaddingLooksThroughToTheCard() throws {
+        var card = container(.card, columnLayout(), frame: CGRect(x: 40, y: 200, width: 0, height: 0), fits: true, [fittingText("One")])
+        card.padding = LayerNode.Padding(all: 16)
+        let board = TreeBoard([card])
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        board.model.ink = coordinator
+        let shape = board.shape(card.id)
+        let padding = CGPoint(x: shape.rect.minX + 8, y: shape.rect.midY)
+        #expect(TreeTargets.leaf(at: padding, in: card.id, content: board.store.tree, index: board.store.index) == nil)
+
+        // The board's view shows the canvas unscrolled and unzoomed: a point in the view is the same on the canvas.
+        coordinator.appendInk([[CGPoint(x: padding.x, y: padding.y - 40), CGPoint(x: padding.x, y: padding.y + 40)]],
+                              ink: PKInk(.pen, color: .black), width: 4)
+        let drawing = try #require(board.store.tree.canvas.first { $0.kind == .drawing })
+
+        #expect(board.model.hoverTarget(at: padding) == board.thing(drawing.id), "the ink is on top")
+        #expect(board.model.hoverTarget(at: padding, skippingDrawings: true) == board.thing(card.id))
+        _ = coordinator
     }
 
     // MARK: The lasso and the box

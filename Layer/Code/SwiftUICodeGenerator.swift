@@ -41,9 +41,9 @@ enum SwiftUICodeGenerator {
         func typeName(of screen: TreeScreen) -> String { typeNames[screen.id] ?? SwiftUICodeGenerator.typeName(of: screen) }
     }
 
-    /// "Screen 1" becomes `Screen1`, as `DesignScreen.typeName` names it.
+    /// "Screen 1" becomes `Screen1`: see `TreeScreen.typeName(forScreenNamed:)`.
     static func typeName(of screen: TreeScreen) -> String {
-        DesignScreen.typeName(forScreenNamed: screen.name)
+        TreeScreen.typeName(forScreenNamed: screen.name)
     }
 
     /// The name of each screen's view, told apart where two would be the same: "Screen 2"

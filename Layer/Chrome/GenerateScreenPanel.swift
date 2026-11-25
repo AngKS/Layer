@@ -2,7 +2,7 @@ import SwiftUI
 
 /// How the screen being generated is getting on, floating at the bottom of the canvas:
 /// thinking, writing (with how many elements so far), then done (or how many parts of it
-/// couldn't be brought in) or what went wrong.
+/// couldn't be brought in, or still doesn't fit) or what went wrong.
 struct GenerationStatus: View {
     @Environment(AppModel.self) private var model
 
@@ -57,9 +57,14 @@ struct GenerationStatus: View {
     /// What a finished generation says: how much it wrote, or, when some of what the model wrote
     /// couldn't be brought in, how much that was.
     static func finishedText(_ generation: AppModel.ScreenGeneration) -> String {
-        guard generation.leftOut > 0 else { return "Wrote \(elements(generation.elementCount))" }
-        let parts = generation.leftOut == 1 ? "1 part" : "\(generation.leftOut) parts"
-        return "Finished. \(parts) couldn't be brought in."
+        guard generation.leftOut > 0 || generation.unfixed > 0 else { return "Wrote \(elements(generation.elementCount))" }
+        var text = "Finished."
+        if generation.leftOut > 0 {
+            let parts = generation.leftOut == 1 ? "1 part" : "\(generation.leftOut) parts"
+            text += " \(parts) couldn't be brought in."
+        }
+        if generation.unfixed > 0 { text += " \(UnfixedIssue.sentence(generation.unfixedIssues))." }
+        return text
     }
 
     private static func elements(_ count: Int) -> String {

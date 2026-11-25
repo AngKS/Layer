@@ -27,7 +27,8 @@ extension LayerNode: KeepsUnknownKeys {
         width = try container.decodeIfPresent(Sizing.self, forKey: .width) ?? Sizing(.fixed)
         height = try container.decodeIfPresent(Sizing.self, forKey: .height) ?? Sizing(.fixed)
         frame = try container.decodeIfPresent(CGRect.self, forKey: .frame) ?? .zero
-        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation)
+        // Kept as any angle set here is: from 0 up to 360, none when upright or not a number.
+        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation).flatMap(Rotation.kept)
         scale = try container.decodeIfPresent(CGFloat.self, forKey: .scale)
         content.text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         content.symbol = try container.decodeIfPresent(String.self, forKey: .symbol)

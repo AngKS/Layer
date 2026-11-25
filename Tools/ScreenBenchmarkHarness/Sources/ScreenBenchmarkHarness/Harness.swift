@@ -8,9 +8,13 @@ import Foundation
         let arguments = Array(CommandLine.arguments.dropFirst())
         switch arguments.first {
         case "check":
-            exit(check() ? 0 : 1)
+            let harness = check()
+            let rule = HostedFormatRule.check()
+            exit(harness && rule ? 0 : 1)
         case "outline":
             await onDevice(runs: runs(arguments.dropFirst(1).first))
+        case "hosted" where arguments.count >= 3 && arguments[2] == "both":
+            await hostedBoth(model: arguments[1], runs: runs(arguments.dropFirst(3).first))
         case "hosted" where arguments.count >= 3:
             guard let format = Format(rawValue: arguments[2]) else { usage() }
             await hosted(model: arguments[1], format: format, runs: runs(arguments.dropFirst(3).first))
@@ -20,7 +24,7 @@ import Foundation
     }
 
     private static func usage() -> Never {
-        print("usage: run.sh check | outline [runs] | hosted <LM Studio model id> <outline|a2ui> [runs]")
+        print("usage: run.sh check | outline [runs] | hosted <LM Studio model id> <outline|a2ui|both> [runs]")
         exit(2)
     }
 
@@ -90,32 +94,60 @@ import Foundation
     private static func hosted(model: String, format: Format, runs: Int) async {
         var summary = Summary(label: "LM Studio \(model) \(format.rawValue)")
         for brief in Briefs.all {
+            for _ in 0..<runs { await hostedRun(brief, model: model, format: format, into: &summary) }
+        }
+        print(summary.line)
+    }
+
+    /// Both formats, one after the other on each brief, A2UI first on the odd ones (the first, third...), so that
+    /// neither format always meets a model warmed or cooled by the other. Each format's summary as `hosted` prints it,
+    /// then the default `HostedFormatRule` chooses from them (My call 8).
+    private static func hostedBoth(model: String, runs: Int) async {
+        var outline = Summary(label: "LM Studio \(model) outline")
+        var a2ui = Summary(label: "LM Studio \(model) a2ui")
+        for (index, brief) in Briefs.all.enumerated() {
             for _ in 0..<runs {
-                let instructions = format == .outline ? ScreenPrompt.instructions(.full, for: brief) : A2UIPrompt.instructions(for: brief)
-                let conversation = HostedConversation(
-                    system: instructions,
-                    messages: [HostedConversation.Message(role: .user, text: ScreenPrompt.request(brief, board: nil, room: .full))])
-                await measure(brief, format, into: &summary) { take in
-                    var text = ""
-                    var tokens: Int?
-                    for try await event in HostedModelClient.stream(
-                        conversation, schema: nil, maximumTokens: nil, temperature: nil, provider: .lmStudio, model: model, key: nil
-                    ) {
-                        switch event {
-                        case .text(let more):
-                            text += more
-                            take(text)
-                        case .usage(_, let output):
-                            tokens = max(tokens ?? 0, output)
-                        case .reasoning, .toolCall:
-                            break
-                        }
-                    }
-                    return tokens
+                if index % 2 == 0 {
+                    await hostedRun(brief, model: model, format: .a2ui, into: &a2ui)
+                    await hostedRun(brief, model: model, format: .outline, into: &outline)
+                } else {
+                    await hostedRun(brief, model: model, format: .outline, into: &outline)
+                    await hostedRun(brief, model: model, format: .a2ui, into: &a2ui)
                 }
             }
         }
-        print(summary.line)
+        print(outline.line)
+        print(a2ui.line)
+        func result(_ summary: Summary) -> HostedFormatRule.Result {
+            HostedFormatRule.Result(valid: summary.valid, screens: summary.screens, firstContentP50: summary.firstContentP50)
+        }
+        print(HostedFormatRule.line(outline: result(outline), a2ui: result(a2ui)))
+    }
+
+    /// One answer from the hosted model in `format`, scored into `summary`.
+    private static func hostedRun(_ brief: String, model: String, format: Format, into summary: inout Summary) async {
+        let instructions = format == .outline ? ScreenPrompt.instructions(.full, for: brief) : A2UIPrompt.instructions(for: brief)
+        let conversation = HostedConversation(
+            system: instructions,
+            messages: [HostedConversation.Message(role: .user, text: ScreenPrompt.request(brief, board: nil, room: .full))])
+        await measure(brief, format, into: &summary) { take in
+            var text = ""
+            var tokens: Int?
+            for try await event in HostedModelClient.stream(
+                conversation, schema: nil, maximumTokens: nil, temperature: nil, provider: .lmStudio, model: model, key: nil
+            ) {
+                switch event {
+                case .text(let more):
+                    text += more
+                    take(text)
+                case .usage(_, let output):
+                    tokens = max(tokens ?? 0, output)
+                case .reasoning, .toolCall:
+                    break
+                }
+            }
+            return tokens
+        }
     }
 
     /// Runs one answer through the app's stream reader as it arrives, timing the first screen handed on (what the

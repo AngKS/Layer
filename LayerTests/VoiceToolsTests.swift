@@ -185,6 +185,20 @@ struct CanvasPictureTests {
         #expect(picture.screenInWords("S2") == #"S2, the screen "Profile""#)
         #expect(picture.screenInWords("S9") == nil)
     }
+
+    /// The board of `GroupModelTests.groupItemsAreLeftOutOfWhatIsDrawnExportedAndDescribed`, which this part of it
+    /// came from (plan 6, Task 1, F11): B and D grouped on the screen, and the two notes on the canvas.
+    @Test func aGroupsMembersAreToldInItsPlace() {
+        let board = OrderBoard()
+        board.group(board.b, board.d)
+        board.group(board.note1, board.note2, named: "N")
+
+        // Voice's picture of the board lists the members, and no group.
+        let picture = CanvasPicture.capture(from: board.model, handles: VoiceHandles())
+        #expect(picture.screens.first?.elements.count == 5)
+        #expect(picture.loose.count == 2)
+        #expect(!(picture.screens.flatMap(\.elements) + picture.loose).contains { $0.kind == ElementKind.group.layerName.lowercased() })
+    }
 }
 
 @Suite("What a spoken command can do")

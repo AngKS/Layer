@@ -228,18 +228,10 @@ enum DesignActions {
         return Placement(origin: CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded()), scale: scale)
     }
 
-    /// Where a new element goes on a screen: centred, below everything already there,
-    /// or at the top of the safe area on an empty screen.
+    /// Where a new element goes on a screen: `ElementLayout.newElementFrame` below its visible elements. Plan 6's Task 5
+    /// moves its callers to `DesignStore.newElementFrame(_:on:)` and deletes it.
     static func frameForNewElement(_ element: DesignElement, on screen: DesignScreen) -> CGRect {
-        let device = screen.device
-        let lowest = screen.elements.filter { !$0.isHidden }.map(\.frame.maxY).max()
-        let top = (lowest.map { $0 + 16 } ?? device.safeTop + 16)
-        var frame = ElementLayout.frame(for: element.kind, sketch: CGRect(x: device.size.width / 2, y: top, width: 0, height: 0), on: device)
-        frame.origin.y = min(top, max(device.safeTop, device.size.height - device.safeBottom - frame.height - 8))
-        if ElementLayout.keepsSketchedPosition(element.kind) {
-            frame.origin.x = ((device.size.width - frame.width) / 2).rounded()
-        }
-        return frame
+        ElementLayout.newElementFrame(for: element.kind, on: screen.device, below: screen.elements.filter { !$0.isHidden }.map(\.frame))
     }
 }
 

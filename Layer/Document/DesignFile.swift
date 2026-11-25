@@ -386,7 +386,7 @@ struct DesignFile: Sendable {
     /// either become elements or disappear.
     var content = DesignContent()
     /// All the ink that shows on the board, where it lies on the canvas.
-    var drawing: PKDrawing { content.visibleInk }
+    var drawing: PKDrawing { content.tree.visibleInk }
     /// Attached pictures, as image file data, by the UUID that elements refer to them with.
     var images: [String: Data] = [:]
     /// A small picture of the board, as JPEG data. Nil for a board with nothing on it.
@@ -405,7 +405,7 @@ struct DesignFile: Sendable {
     /// drawings: strokes that touch become one drawing each.
     init(content: DesignContent = DesignContent(), drawing: PKDrawing = PKDrawing(), images: [String: Data] = [:]) {
         self.content = content
-        self.content.adopt(drawing)
+        self.content.tree.adopt(drawing)
         self.images = images
     }
 

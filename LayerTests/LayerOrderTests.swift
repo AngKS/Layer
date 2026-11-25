@@ -14,7 +14,7 @@ import Testing
 struct OrderBoard {
     let model: AppModel
     let undo = UndoManager()
-    let screen: DesignScreen.ID
+    let screen: TreeScreen.ID
     let a: DesignStore.ElementRef
     let b: DesignStore.ElementRef
     let c: DesignStore.ElementRef
@@ -30,19 +30,25 @@ struct OrderBoard {
         model = AppModel(document: LayerDocument())
         model.canvasSize = CGSize(width: 1210, height: 834)
         model.viewport = Viewport(offset: .zero, scale: 1)
-        screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
-        let placed = model.store.setElements(["A", "B", "C", "D", "E"].enumerated().map { index, name in
+        let buttons = ["A", "B", "C", "D", "E"].enumerated().map { index, name in
             Self.element(.button, named: name, CGRect(x: 40, y: 40 + CGFloat(index) * 150, width: 300, height: 100))
-        }, on: screen)
+        }
+        let store = model.store
+        let screenID = store.addFreeScreen(buttons, origin: CGPoint(x: 100, y: 50), scale: 0.5)
+        screen = screenID
+        let placed = buttons.map { DesignStore.ElementRef(host: .screen(screenID), element: $0.id) }
         (a, b, c, d, e) = (placed[0], placed[1], placed[2], placed[3], placed[4])
-        note1 = model.store.addFloating(Self.element(.stickyNote, named: "note 1", CGRect(x: 500, y: 100, width: 140, height: 130)), scale: 1)
-        note2 = model.store.addFloating(Self.element(.stickyNote, named: "note 2", CGRect(x: 700, y: 100, width: 140, height: 130)), scale: 1)
-        var ink = DesignElement.drawing([
+        func onCanvas(_ node: LayerNode) -> DesignStore.ElementRef {
+            DesignStore.ElementRef(host: .canvas, element: store.addCanvasNode(node, scale: 1))
+        }
+        note1 = onCanvas(Self.element(.stickyNote, named: "note 1", CGRect(x: 500, y: 100, width: 140, height: 130)))
+        note2 = onCanvas(Self.element(.stickyNote, named: "note 2", CGRect(x: 700, y: 100, width: 140, height: 130)))
+        var ink = LayerNode.drawing([
             Self.stroke(from: CGPoint(x: 520, y: 400), to: CGPoint(x: 640, y: 460)),
             Self.stroke(from: CGPoint(x: 640, y: 400), to: CGPoint(x: 520, y: 460)),
         ])!
         ink.name = "drawing"
-        drawing = model.store.addFloating(ink, scale: 1)
+        drawing = onCanvas(ink)
         // Building the board is not something these tests undo.
         undo.groupsByEvent = false
         model.store.undoManager = undo
@@ -52,7 +58,8 @@ struct OrderBoard {
     /// test can have a drawing between notes. One step to undo, as a note added by hand is.
     @discardableResult
     func addNote(named name: String, at origin: CGPoint) -> DesignStore.ElementRef {
-        store.addFloating(Self.element(.stickyNote, named: name, CGRect(origin: origin, size: CGSize(width: 140, height: 130))), scale: 1)
+        let note = Self.element(.stickyNote, named: name, CGRect(origin: origin, size: CGSize(width: 140, height: 130)))
+        return DesignStore.ElementRef(host: .canvas, element: store.addCanvasNode(note, scale: 1))
     }
 
     /// One element, or several, as a selection.
@@ -61,10 +68,9 @@ struct OrderBoard {
     }
 
     /// The names of what is on a screen, or on the open canvas, back to front, as the
-    /// design's own list holds them.
+    /// design's own list held them (`listed(on:)`).
     func order(on host: DesignStore.ElementRef.Host) -> [String] {
-        let parent: DesignScreen.ID? = if case .screen(let id) = host { id } else { nil }
-        return store.content.children(of: parent).map { $0.name ?? "" }
+        store.listed(on: host).map { $0.name ?? "" }
     }
 
     /// The names of what is on the board's screen, back to front.
@@ -73,10 +79,8 @@ struct OrderBoard {
     /// The names of what is on the open canvas, back to front.
     var canvasOrder: [String] { order(on: .canvas) }
 
-    static func element(_ kind: ElementKind, named name: String, _ frame: CGRect) -> DesignElement {
-        var element = DesignElement(kind: kind, frame: frame, text: kind.placeholder, tint: Theme.accent)
-        element.name = name
-        return element
+    static func element(_ kind: ElementKind, named name: String, _ frame: CGRect) -> LayerNode {
+        .leaf(kind, frame: frame, text: kind.placeholder, tint: Theme.accent, name: name)
     }
 
     static func stroke(from start: CGPoint, to end: CGPoint) -> PKStroke {
@@ -242,7 +246,7 @@ struct LayerOrderTests {
         // A member of a locked group is locked by it, though its own flag isn't set.
         let grouped = OrderBoard()
         grouped.group(grouped.b, grouped.d) { $0.isLocked = true }
-        #expect(grouped.store.element(grouped.b.element)?.isLocked == false)
+        #expect(grouped.store.node(grouped.b.element)?.isLocked == false)
         for arrangement in DesignStore.Arrangement.allCases {
             #expect(!grouped.store.canArrange(grouped.selection(grouped.b), arrangement))
             #expect(!grouped.store.canArrange(grouped.b, arrangement))
@@ -298,12 +302,12 @@ struct MovingLayersTests {
         #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
 
         #expect(board.store.moveLayer(board.a.element, to: .group(group.element), before: board.b.element))
-        #expect(board.store.content.members(of: group.element).map { $0.name ?? "" } == ["B", "A", "D"])
-        #expect(board.store.element(board.a.element)?.group == group.element)
+        #expect(board.store.node(group.element)?.children.map { $0.name ?? "" } == ["B", "A", "D"])
+        #expect(board.store.container(of: board.a.element) == group.element)
 
         #expect(board.store.moveLayer(board.a.element, to: .host(.screen(board.screen)), before: nil))
-        #expect(board.store.element(board.a.element)?.group == nil)
-        #expect(board.store.content.members(of: group.element).map { $0.name ?? "" } == ["B", "D"])
+        #expect(board.store.container(of: board.a.element) == nil)
+        #expect(board.store.node(group.element)?.children.map { $0.name ?? "" } == ["B", "D"])
     }
 
     @Test func aGroupLeftWithOneMemberByAMoveDissolves() {
@@ -312,44 +316,44 @@ struct MovingLayersTests {
         board.undo.removeAllActions()
 
         #expect(board.store.moveLayer(board.b.element, to: .host(.screen(board.screen)), before: nil))
-        #expect(board.store.element(group.element) == nil)
-        #expect(board.store.element(board.d.element)?.group == nil)
+        #expect(board.store.node(group.element) == nil)
+        #expect(board.store.container(of: board.d.element) == nil)
         #expect(board.screenOrder == ["B", "A", "C", "D", "E"])
 
         board.undo.undo()
-        #expect(board.store.element(group.element) != nil)
-        #expect(board.store.element(board.b.element)?.group == group.element)
+        #expect(board.store.node(group.element) != nil)
+        #expect(board.store.container(of: board.b.element) == group.element)
         #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
     }
 
     @Test func aLayerCannotBeMovedToAnotherHostsList() {
         let board = OrderBoard()
-        let other = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 0.5)).id
+        let other = board.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 900, y: 50), scale: 0.5)
         let otherGroup = board.group(board.note1, board.note2)
-        let before = board.store.content
+        let before = board.store.tree
 
         #expect(!board.store.moveLayer(board.a.element, to: .host(.screen(other)), before: nil))
         #expect(!board.store.moveLayer(board.a.element, to: .host(.canvas), before: nil))
         #expect(!board.store.moveLayer(board.a.element, to: .group(otherGroup.element), before: nil))
-        #expect(board.store.content == before)
+        #expect(board.store.tree == before)
     }
 
     @Test func aGroupCannotBeMovedIntoItself() {
         let board = OrderBoard()
         let inner = board.group(board.b, board.c, named: "inner")
         let outer = board.group(inner, board.d, named: "outer")
-        let before = board.store.content
+        let before = board.store.tree
 
         #expect(!board.store.moveLayer(outer.element, to: .group(outer.element), before: nil))
         #expect(!board.store.moveLayer(outer.element, to: .group(inner.element), before: nil))
-        #expect(board.store.content == before)
+        #expect(board.store.tree == before)
     }
 
     @Test func aDrawingDoesntMove() {
         let board = OrderBoard()
-        let before = board.store.content
+        let before = board.store.tree
         #expect(!board.store.moveLayer(board.drawing.element, to: .host(.canvas), before: board.note1.element))
-        #expect(board.store.content == before)
+        #expect(board.store.tree == before)
     }
 
     @Test func drawingsKeepTheirSlotsWhenThingsMove() {
@@ -360,7 +364,7 @@ struct MovingLayersTests {
 
     @Test func aLockedLayerDoesntMove() {
         let board = OrderBoard()
-        board.store.update(board.a) { $0.isLocked = true }
+        board.store.update(board.a.element) { $0.isLocked = true }
         #expect(!board.store.moveLayer(board.a.element, to: .host(.screen(board.screen)), before: nil))
         #expect(board.screenOrder == ["A", "B", "C", "D", "E"])
     }
@@ -373,7 +377,7 @@ struct MovingLayersTests {
         board.store.moveLayer(board.a.element, to: .group(group.element), before: board.b.element)
         board.undo.undo()
         #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
-        #expect(board.store.element(board.a.element)?.group == nil)
+        #expect(board.store.container(of: board.a.element) == nil)
         #expect(!board.undo.canUndo)
     }
 }

@@ -10,6 +10,13 @@ extension TreeRules {
     /// `DesignStore.commitGenerated` or `addLaidOutScreens` there is nothing left for them to do (plan 3, call 6).
     static func laidOut(_ root: LayerNode, deviceID: String?, settings: CanvasSettings, previous: LayerNode?,
                         measure: TextMeasure = .shared) -> LayerNode {
+        laidOutReporting(root, deviceID: deviceID, settings: settings, previous: previous, measure: measure).root
+    }
+
+    /// `laidOut(_:deviceID:settings:previous:measure:)`, with what the layout noticed and left alone (what a generated
+    /// or imported screen is told it still has wrong: `UnfixedIssue`).
+    static func laidOutReporting(_ root: LayerNode, deviceID: String?, settings: CanvasSettings, previous: LayerNode?,
+                                 measure: TextMeasure = .shared) -> (root: LayerNode, diagnostics: [LayoutDiagnostic]) {
         #if DEBUG
         GenerationWork.laidOutAhead(root.id, onMainThread: Thread.isMainThread)
         #endif
@@ -22,7 +29,7 @@ extension TreeRules {
             earlier.screens[0].root = previous
             before = earlier
         }
-        apply(to: &content, after: before, measure: measure)
-        return content.screens[0].root
+        let diagnostics = apply(to: &content, after: before, measure: measure)
+        return (content.screens[0].root, diagnostics)
     }
 }

@@ -5,8 +5,8 @@ import Testing
 import UIKit
 @testable import Layer
 
-private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> DesignElement {
-    DesignElement(kind: kind, frame: CGRect(x: x, y: y, width: width, height: height), text: kind.placeholder, tint: Theme.accent)
+private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> LayerNode {
+    .leaf(kind, frame: CGRect(x: x, y: y, width: width, height: height), text: kind.placeholder, tint: Theme.accent)
 }
 
 /// A phone screen at (100, 100), drawn at full size, holding a button, with a sticky note on
@@ -15,7 +15,7 @@ private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: C
 @MainActor
 private struct HitBoard {
     let model: AppModel
-    let screen: DesignScreen.ID
+    let screen: TreeScreen.ID
     let button: DesignStore.ElementRef
     let note: DesignStore.ElementRef
 
@@ -25,9 +25,10 @@ private struct HitBoard {
         model = AppModel(document: LayerDocument())
         model.canvasSize = CGSize(width: 1210, height: 834)
         model.viewport = Viewport(offset: .zero, scale: 1)
-        screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
-        button = model.store.setElements([element(.button, 20, 300, 353, 50)], on: screen)[0]
-        note = model.store.addFloating(element(.stickyNote, 600, 100, 140, 130), scale: 1)
+        let one = element(.button, 20, 300, 353, 50)
+        screen = model.store.addFreeScreen([one], origin: CGPoint(x: 100, y: 100), scale: 1)
+        button = DesignStore.ElementRef(host: .screen(screen), element: one.id)
+        note = model.store.addOnCanvas(element(.stickyNote, 600, 100, 140, 130), scale: 1)
     }
 
     /// The middle of something, in the view.
@@ -61,13 +62,13 @@ struct HiddenHitTestTests {
     /// Locked, a drawing is picked by its frame; hidden as well, it isn't drawn at all.
     @Test func aHiddenLockedDrawingIsLookedThrough() {
         let board = HitBoard()
-        var ink = DesignStore.newElement(.drawing)
+        var ink = LayerNode.standard(.drawing)
         ink.frame = CGRect(x: 100, y: 380, width: 300, height: 80)
         ink.isLocked = true
-        let drawing = board.store.addFloating(ink, scale: 1)
+        let drawing = board.store.addOnCanvas(ink, scale: 1)
         let point = board.middle(of: .element(board.button))
         #expect(board.model.hoverTarget(at: point) == .element(drawing))
-        board.store.update(drawing) { $0.isHidden = true }
+        board.store.update(drawing.element) { $0.isHidden = true }
         #expect(board.model.hoverTarget(at: point) == .element(board.button))
     }
 
@@ -95,7 +96,7 @@ struct HiddenHitTestTests {
     /// With frame names off, the strip a name would be drawn in is only canvas (audit C14).
     @Test func aScreensNameStripIsOnlyThereWhileNamesAreShown() {
         let board = HitBoard()
-        let strip = board.store.screen(board.screen)?.labelFrame ?? .null
+        let strip = board.store.treeScreen(board.screen).map { $0.labelFrame(on: board.store.tree.device(of: $0)) } ?? .null
         let point = board.model.viewport.viewPoint(for: CGPoint(x: strip.midX, y: strip.midY))
         #expect(board.model.hoverTarget(at: point) == .screen(board.screen))
         board.store.updateCanvas { $0.showsFrameNames = false }
@@ -115,7 +116,7 @@ struct InkOverAnElementTests {
         board.model.ink = coordinator
         let middle = board.middle(of: .element(board.button))
         coordinator.appendInk([[CGPoint(x: middle.x - 120, y: middle.y), CGPoint(x: middle.x + 120, y: middle.y)]], ink: PKInk(.pen, color: .black), width: 4)
-        let drawing = try #require(board.store.floating.first { $0.element.kind == .drawing })
+        let drawing = try #require(board.store.tree.canvas.first { $0.kind == .drawing })
         return (coordinator, .init(host: .canvas, element: drawing.id))
     }
 
@@ -143,8 +144,7 @@ struct InkOverAnElementTests {
         let drags = CanvasDrags()
         board.model.drags = drags
         let owner = CanvasDrags.Owner()
-        let found = try #require(board.store.resolve(board.button))
-        let screen = board.store.screen(board.screen)
+        _ = try #require(board.store.placed(board.button))
         let buttonBefore = board.store.canvasFrame(of: .element(board.button))
         let inkBefore = try #require(board.store.canvasFrame(of: .element(drawing)))
         let start = board.middle(of: .element(board.button))
@@ -154,7 +154,7 @@ struct InkOverAnElementTests {
         let mark = board.store.historyMark
 
         for step in 1...4 {
-            drags.moveOnTarget(board.button, element: found.element, placement: found.placement, on: screen, by: CGSize(width: 10 * step, height: 0), startingAt: start, owner: owner, model: board.model)
+            drags.moveOnTarget(board.button, by: CGSize(width: 10 * step, height: 0), startingAt: start, owner: owner, model: board.model)
         }
         drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
 
@@ -180,18 +180,17 @@ struct InkOverAnElementTests {
         let drags = CanvasDrags()
         board.model.drags = drags
         let owner = CanvasDrags.Owner()
-        let found = try #require(board.store.resolve(board.button))
-        let screen = board.store.screen(board.screen)
+        _ = try #require(board.store.placed(board.button))
         let start = board.middle(of: .element(board.button))
 
         // Drawing taken well away from the button.
-        drags.moveOnTarget(board.button, element: found.element, placement: found.placement, on: screen, by: CGSize(width: 0, height: 200), startingAt: start, owner: owner, model: board.model)
+        drags.moveOnTarget(board.button, by: CGSize(width: 0, height: 200), startingAt: start, owner: owner, model: board.model)
         drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
         let inkMoved = board.store.canvasFrame(of: .element(drawing))
         let buttonBefore = try #require(board.store.canvasFrame(of: .element(board.button)))
 
-        let now = try #require(board.store.resolve(board.button))
-        drags.moveOnTarget(board.button, element: now.element, placement: now.placement, on: screen, by: CGSize(width: 30, height: 0), startingAt: start, owner: owner, model: board.model)
+        _ = try #require(board.store.placed(board.button))
+        drags.moveOnTarget(board.button, by: CGSize(width: 30, height: 0), startingAt: start, owner: owner, model: board.model)
         drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
         #expect(board.store.canvasFrame(of: .element(drawing)) == inkMoved)
         let buttonAfter = try #require(board.store.canvasFrame(of: .element(board.button)))
@@ -208,14 +207,13 @@ struct InkOverAnElementTests {
         let drags = CanvasDrags()
         board.model.drags = drags
         let owner = CanvasDrags.Owner()
-        let found = try #require(board.store.resolve(board.button))
-        let screen = board.store.screen(board.screen)
+        _ = try #require(board.store.placed(board.button))
         let buttonBefore = try #require(board.store.canvasFrame(of: .element(board.button)))
         let inkBefore = board.store.canvasFrame(of: .element(drawing))
         let middle = board.middle(of: .element(board.button))
         let start = CGPoint(x: middle.x, y: middle.y + 22)
 
-        drags.moveOnTarget(board.button, element: found.element, placement: found.placement, on: screen, by: CGSize(width: 30, height: 0), startingAt: start, owner: owner, model: board.model)
+        drags.moveOnTarget(board.button, by: CGSize(width: 30, height: 0), startingAt: start, owner: owner, model: board.model)
         drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
 
         #expect(board.store.canvasFrame(of: .element(drawing)) == inkBefore)

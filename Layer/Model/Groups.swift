@@ -3,37 +3,16 @@ import Foundation
 
 /// Groups: several things on one screen, or on the open canvas, kept together as one.
 ///
-/// A group is a container in the design's tree. In the list the tree is lowered to
-/// (`DesignContent.elements`) it is an element of the kind `.group`, on the host its members
-/// are on, just in front of them. Each member says which group it belongs to with its
-/// `group`, and groups nest by a group item belonging to another. The item carries the
-/// group's name, lock, hide and angle; its frame is the box round its members.
-///
-/// What draws, exports, describes and hit-tests elements reads the design's views
-/// (`screens`, `floating`), which leave group items out and give each member the lock and
-/// hide of the groups above it. What shows the tree, the Layers panel, reads the list itself
-/// (`children(of:)`): group items included, with each thing's own flags. What can be touched
-/// on the canvas is read from the tree itself, any container standing for what it holds
-/// (`TreeTargets`).
+/// A group is a container in the design's tree, holding its members as its children, and nesting
+/// in another as one of its children. It carries the group's name, lock, hide and angle; a free
+/// group's frame is the box round what it holds. What draws, exports, describes, hit-tests and
+/// lists things reads the tree (`TreeIndex`, `TreeTargets`), any container standing for what it
+/// holds until it is gone into.
 // PROJECTION: deleted in plan 6
-// The list's group pointers, read by tests of the projection and by plan 6's callers (voice, Siri).
+// The list's group pointers, for the callers plan 6 moves last: `AppModel.selectedLeaves` (voice) and Siri's hide.
 extension DesignContent {
-    /// The things that belong to a group directly, back to front.
-    func members(of group: DesignElement.ID) -> [DesignElement] {
-        Self.members(of: group, in: elements)
-    }
-
-    /// The things in a group at any depth that aren't groups themselves, back to front.
-    func leaves(of group: DesignElement.ID) -> [DesignElement] {
-        Self.leaves(of: group, in: elements)
-    }
-
-    /// `members(of:)` in a list of the design's elements: the content's own, or the store's kept one.
-    static func members(of group: DesignElement.ID, in elements: [DesignElement]) -> [DesignElement] {
-        elements.filter { $0.group == group }
-    }
-
-    /// `leaves(of:)` in a list of the design's elements.
+    /// The things in a group at any depth that aren't groups themselves, back to front, in a list of the
+    /// design's elements.
     static func leaves(of group: DesignElement.ID, in elements: [DesignElement]) -> [DesignElement] {
         #if DEBUG
         GroupWork.leafWalked()
@@ -60,18 +39,6 @@ extension DesignContent {
     func ancestors(of id: DesignElement.ID) -> [DesignElement.ID] {
         guard let element = element(id) else { return [] }
         return Self.groups(above: element, find: element(_:)).map(\.id)
-    }
-
-    /// Whether an element is locked: by itself, or by a group above it.
-    func isLockedWithItsGroups(_ id: DesignElement.ID) -> Bool {
-        guard let element = element(id) else { return false }
-        return element.isLocked || Self.groups(above: element, find: element(_:)).contains(where: \.isLocked)
-    }
-
-    /// Whether an element is hidden: by itself, or by a group above it.
-    func isHiddenWithItsGroups(_ id: DesignElement.ID) -> Bool {
-        guard let element = element(id) else { return false }
-        return element.isHidden || Self.groups(above: element, find: element(_:)).contains(where: \.isHidden)
     }
 
     /// The groups above an element, the nearest first, looked up with `find`. The chain
@@ -112,34 +79,13 @@ extension DesignContent {
 }
 
 // PROJECTION: deleted in plan 6
-// The list's groups read from the store's kept projection: for `AppModel.selectedLeaves` (voice) and the tests of
-// the projection's groups. The canvas and panels read the tree.
+// The list's groups read from the store's kept projection: for `AppModel.selectedLeaves` (voice). The canvas and
+// panels read the tree.
 extension DesignStore {
-    /// What is on a screen, or on the open canvas, back to front, as the design's own list
-    /// holds it: group items included, and each thing with its own lock and hide.
-    func children(on host: ElementRef.Host) -> [DesignElement] {
-        projection.children(of: host.parent)
-    }
-
     /// The things in a group at any depth that aren't groups themselves, read from the design as it is kept for this
-    /// version (`projection`) rather than lowered again: see `DesignContent.leaves(of:)`.
+    /// version (`projection`) rather than lowered again: see `DesignContent.leaves(of:in:)`.
     func leaves(of group: DesignElement.ID) -> [DesignElement] {
         DesignContent.leaves(of: group, in: projection.elements)
-    }
-
-    /// The group items on a screen, or on the open canvas, back to front.
-    func groupItems(on host: ElementRef.Host) -> [DesignElement] {
-        children(on: host).filter { $0.kind == .group }
-    }
-
-    /// A group item, or nil when there is none by that identifier.
-    func groupItem(_ id: DesignElement.ID) -> DesignElement? {
-        element(id).flatMap { $0.kind == .group ? $0 : nil }
-    }
-
-    /// Whether an element is locked: by itself, or by a group above it.
-    func isLockedWithItsGroups(_ element: DesignElement) -> Bool {
-        element.isLocked || element.group != nil && DesignContent.groups(above: element, find: self.element(_:)).contains(where: \.isLocked)
     }
 }
 
@@ -160,7 +106,7 @@ extension DesignStore {
     /// in each is selected): the outermost of it and the containers above it that hasn't been,
     /// which is `leaf` itself once all of them have. A container stands for a tap in the gap
     /// between what it holds.
-    func pickTarget(for leaf: ElementRef, entered: Set<DesignElement.ID>) -> ElementRef {
+    func pickTarget(for leaf: ElementRef, entered: Set<UUID>) -> ElementRef {
         groups(holding: leaf).last { !entered.contains($0.element) } ?? leaf
     }
 
@@ -170,18 +116,6 @@ extension DesignStore {
         let path = [leaf] + groups(holding: leaf)
         guard let index = path.firstIndex(of: outer), index > 0 else { return leaf }
         return path[index - 1]
-    }
-
-    /// What can be touched on each screen and the open canvas while the containers in `entered` have been
-    /// gone into: see `TreeTargets`. Memoised per design version and entered set: hover asks on every move
-    /// of the pen. `CanvasWork.targetPasses` counts each build.
-    func treeTargets(entered: Set<UUID>) -> TreeTargets {
-        keptTargets(entered: entered) {
-            #if DEBUG
-            CanvasWork.targetPasses += 1
-            #endif
-            return TreeTargets(tree, index: index, entered: entered)
-        }
     }
 
     // MARK: Moving, landing and resizing a group
@@ -417,7 +351,7 @@ extension DesignStore {
 
 extension DesignStore.ElementRef.Host {
     /// The screen it is, or nil for the open canvas: what an element there has as its `parent`.
-    var parent: DesignScreen.ID? {
+    var parent: TreeScreen.ID? {
         if case .screen(let id) = self { id } else { nil }
     }
 }

@@ -22,21 +22,19 @@ struct DrawingSync {
 
         var isEmpty: Bool { drawings.isEmpty && removed.isEmpty }
 
-        // PROJECTION: deleted in plan 6
-        // The DesignContent parameter becomes TreeContent then (F21).
         /// Writes the drawings on the canvas's top level: a new one goes on top at scale 1, one it has
         /// keeps its angle and takes only the frame and ink.
-        func apply(to content: inout DesignContent) {
+        func apply(to content: inout TreeContent) {
             let gone = removed
-            if !gone.isEmpty { content.tree.canvas.removeAll { gone.contains($0.id) } }
+            if !gone.isEmpty { content.canvas.removeAll { gone.contains($0.id) } }
             for drawing in drawings {
-                if let index = content.tree.canvas.firstIndex(where: { $0.id == drawing.id }) {
-                    content.tree.canvas[index].frame = drawing.frame
-                    content.tree.canvas[index].content.ink = drawing.content.ink
+                if let index = content.canvas.firstIndex(where: { $0.id == drawing.id }) {
+                    content.canvas[index].frame = drawing.frame
+                    content.canvas[index].content.ink = drawing.content.ink
                 } else {
                     var added = drawing
                     added.scale = 1
-                    content.tree.canvas.append(added)
+                    content.canvas.append(added)
                 }
             }
         }

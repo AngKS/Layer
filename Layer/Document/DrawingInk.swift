@@ -102,16 +102,6 @@ extension DesignElement {
         return drawing.strokes.count
     }
 
-    /// A drawing's strokes as points on the canvas, for reading it as a sketch.
-    var sketchStrokes: [SketchStroke] {
-        canvasStrokes.map { stroke in
-            SketchStroke(
-                key: stroke.key,
-                points: stroke.path.interpolatedPoints(by: .distance(3)).map { $0.location.applying(stroke.transform) }
-            )
-        }
-    }
-
     /// Whether a touch anywhere in the element's frame picks it. A drawing on the ink
     /// canvas is picked by its strokes instead, which leaves the space round and inside
     /// them free. Locked, it is off that canvas, and its frame is all there is to touch.
@@ -147,10 +137,21 @@ extension LayerNode {
     /// How far it is turned, 0 when upright.
     var resolvedRotation: Double { rotation ?? 0 }
 
-    /// A drawing's strokes where they now lie on the canvas, as `DesignElement.canvasStrokes`.
+    /// A drawing's strokes where they now lie on the canvas: at its frame, stretched to it if the frame has been resized
+    /// since they were drawn, and then turned about the frame's middle by the drawing's angle.
     var canvasStrokes: [PKStroke] {
         guard kind == .drawing else { return [] }
         return DrawingInk.canvasStrokes(id: id, ink: content.ink, frame: frame, rotation: resolvedRotation)
+    }
+
+    /// A drawing's strokes as points on the canvas, for reading it as a sketch.
+    var sketchStrokes: [SketchStroke] {
+        canvasStrokes.map { stroke in
+            SketchStroke(
+                key: stroke.key,
+                points: stroke.path.interpolatedPoints(by: .distance(3)).map { $0.location.applying(stroke.transform) }
+            )
+        }
     }
 
     /// The same drawing with strokes of its own: each stroke is made again with a new key. A
@@ -273,16 +274,14 @@ extension TreeContent {
     }
 }
 
-// PROJECTION: deleted in plan 6
-extension DesignContent {
-    /// `TreeContent.visibleInk`, for the file's picture and the tests that hold a `DesignContent`.
-    var visibleInk: PKDrawing { tree.visibleInk }
-
+extension TreeContent {
     /// Takes in ink for the whole board as one drawing: strokes that touch become one
-    /// drawing each, on the open canvas.
+    /// drawing each, on top of the open canvas, at scale 1.
     mutating func adopt(_ ink: PKDrawing) {
         for strokes in InkGeometry.groups(ink.strokes) {
-            if let drawing = DesignElement.drawing(strokes) { add(drawing, to: nil, scale: 1) }
+            guard var drawing = LayerNode.drawing(strokes) else { continue }
+            drawing.scale = 1
+            canvas.append(drawing)
         }
     }
 }

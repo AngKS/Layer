@@ -4,7 +4,7 @@ import Testing
 @testable import Layer
 
 /// The spec's budgets for a change on the tree (§13), held on every run: one change through the
-/// store on a screen of 100 nodes, and the next read of the screens after it, take under 16 ms at
+/// store on a screen of 100 nodes, and the next read of the design after it, take under 16 ms at
 /// the 95th percentile, and a frame of a drag lays out only the containers on the path from what
 /// it moves to its screen's root.
 @MainActor
@@ -59,9 +59,9 @@ struct StoreChangeBudgetTests {
     }
 
     /// The p50 and p95 of `runs` timed runs of `operation` followed by the next read of `store`'s
-    /// screens, which lowers the tree again, in milliseconds: printed as two BENCH lines, the change
-    /// alone and the change with the read, and returned for the change with the read. `tidy` runs
-    /// after each, untimed.
+    /// index, which the canvas draws from and is worked out again, in milliseconds: printed as two
+    /// BENCH lines, the change alone and the change with the read, and returned for the change with
+    /// the read. `tidy` runs after each, untimed.
     private func measure(_ name: String, reading store: DesignStore, _ operation: (Int) -> Void,
                          tidy: (Int) -> Void = { _ in }) -> (p50: Double, p95: Double) {
         var changes: [Double] = [], withReads: [Double] = []
@@ -69,7 +69,7 @@ struct StoreChangeBudgetTests {
             let start = ContinuousClock.now
             operation(run)
             let changed = ContinuousClock.now
-            _ = store.screens
+            _ = store.index
             let read = ContinuousClock.now
             changes.append(Self.milliseconds(changed - start))
             withReads.append(Self.milliseconds(read - start))
@@ -124,7 +124,7 @@ struct StoreChangeBudgetTests {
         #expect(freeRoot.children.reduce(0) { $0 + $1.children.count } == 100)
         let freeRow = freeRoot.children[12]
         let rowRef = DesignStore.ElementRef(host: .screen(freeID), element: freeRow.id)
-        let move = measure("move", reading: freeModel.store) { _ in freeModel.store.update(rowRef) { $0.frame.origin.x += 1 } }
+        let move = measure("move", reading: freeModel.store) { _ in freeModel.store.update(rowRef.element) { $0.frame.origin.x += 1 } }
         let moved = try #require(freeModel.store.node(freeRow.id))
         #expect(moved.frame.origin.x == freeRow.frame.origin.x + CGFloat(Self.runs), "the row moved a point each run")
         #expect(moved.children.map(\.frame) == freeRow.children.map(\.frame), "what it holds rode in it")
@@ -135,8 +135,12 @@ struct StoreChangeBudgetTests {
         let text = DesignStore.ElementRef(host: .screen(screenID), element: row.children[0].id)
         let body = DesignStore.ElementRef(host: .screen(screenID), element: row.children[1].id)
 
-        let resize = measure("resize", reading: store) { _ in store.update(body) { $0.frame.size.width += 1 } }
-        let edit = measure("text", reading: store) { _ in store.update(text) { $0.text += "a" } }
+        // A laid-out child resized as a handle resizes it: the axis it changed is fixed at its new size.
+        let resize = measure("resize", reading: store) { _ in
+            guard let now = store.node(body.element) else { return }
+            store.resizeLaidOut(body.element, to: CGSize(width: now.frame.width + 1, height: now.frame.height), from: now)
+        }
+        let edit = measure("text", reading: store) { _ in store.update(text.element) { $0.content.text += "a" } }
         var added: UUID?
         let add = measure("add", reading: store) { run in
             let node = Self.generated(.text, "Added \(run)")
@@ -190,13 +194,13 @@ struct StoreChangeBudgetTests {
         let owner = CanvasDrags.Owner()
         let rootBefore = LayoutEngine.timesLaidOut(root.id), othersBefore = others.map(LayoutEngine.timesLaidOut)
         for frame in 1...60 {
-            let (element, placement) = try #require(model.store.resolve(ref))
-            drags.moveElement(ref, from: element.frame, placement: placement, by: CGSize(width: CGFloat(frame), height: 0),
-                              startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model) {
-                drags.moveRule(for: element, placement: placement, on: model.store.screen(screenID), model: model)
+            _ = try #require(model.store.placed(ref))
+            drags.moveNode(ref, by: CGSize(width: CGFloat(frame), height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner,
+                           model: model) { placed in
+                drags.moveRule(for: placed, model: model)
             }
             // Read back after each frame, as drawing the screen does.
-            _ = model.store.screens
+            _ = model.store.index
         }
         let rootLaid = LayoutEngine.timesLaidOut(root.id) - rootBefore
         let othersLaid = zip(others.map(LayoutEngine.timesLaidOut), othersBefore).map(-)

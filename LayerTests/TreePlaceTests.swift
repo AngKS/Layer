@@ -227,8 +227,7 @@ struct TreePlaceTests {
 
     @Test func aDrawingKeepsItsIndexAmongTheCanvasNodes() throws {
         func drawing(at x: CGFloat) throws -> LayerNode {
-            let ink = try #require(DesignElement.drawing([OrderBoard.stroke(from: CGPoint(x: x, y: 0), to: CGPoint(x: x + 40, y: 40))]))
-            return LayerNode(element: ink)
+            try #require(LayerNode.drawing([OrderBoard.stroke(from: CGPoint(x: x, y: 0), to: CGPoint(x: x + 40, y: 40))]))
         }
         func note(at x: CGFloat) -> LayerNode {
             var node = LayerNode(kind: .stickyNote)
@@ -259,8 +258,7 @@ struct TreePlaceTests {
     /// The Layers panel's move out of a group on the open canvas: the group left with one note
     /// dissolves into its slot, the note lands at the back, and the drawing keeps its index.
     @Test func aLayerMovedOutOfAGroupOnTheCanvasLeavesTheDrawingWhereItIs() throws {
-        let ink = try #require(DesignElement.drawing([OrderBoard.stroke(from: CGPoint(x: 0, y: 300), to: CGPoint(x: 40, y: 340))]))
-        let drawing = LayerNode(element: ink)
+        let drawing = try #require(LayerNode.drawing([OrderBoard.stroke(from: CGPoint(x: 0, y: 300), to: CGPoint(x: 40, y: 340))]))
         func note(at x: CGFloat) -> LayerNode {
             var node = LayerNode(kind: .stickyNote)
             node.frame = CGRect(x: x, y: 100, width: 140, height: 130)

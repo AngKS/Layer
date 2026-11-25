@@ -19,7 +19,7 @@ private func stroke(from start: CGPoint, length: CGFloat) -> PKStroke {
 @MainActor
 private struct BusyBoard {
     let model = AppModel(document: LayerDocument())
-    let screen: DesignScreen.ID
+    let screen: TreeScreen.ID
     let lines: [DesignStore.ElementRef]
     static let strokes = 200
 
@@ -28,13 +28,13 @@ private struct BusyBoard {
     init() {
         model.canvasSize = CGSize(width: 1210, height: 834)
         screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
-        lines = model.store.setElements((0..<40).map { index in
-            DesignElement(kind: .text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
-        }, on: screen)
+        lines = model.store.add((0..<40).map { index in
+            LayerNode.leaf(.text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
+        }, onScreen: screen)
         for index in 0..<20 {
             let corner = CGPoint(x: 700 + CGFloat(index % 4) * 120, y: 80 + CGFloat(index / 4) * 140)
             let strokes = (0..<10).map { line in stroke(from: CGPoint(x: corner.x, y: corner.y + CGFloat(line) * 9), length: 80) }
-            model.store.addFloating(DesignElement.drawing(strokes)!, scale: 1)
+            model.store.addOnCanvas(LayerNode.drawing(strokes)!, scale: 1)
         }
         model.store.updateCanvas { $0.snapsToGuides = false }
         model.tool = .select
@@ -47,8 +47,8 @@ private struct BusyBoard {
 
     /// One frame of a finger dragging a group's target `dx` across the glass since it landed.
     func drag(_ drags: CanvasDrags, group: DesignStore.ElementRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
-        guard let (element, placement) = store.resolve(group) else { return }
-        drags.moveOnTarget(group, element: element, placement: placement, on: store.screen(screen), by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model)
+        guard store.placed(group) != nil else { return }
+        drags.moveOnTarget(group, by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model)
     }
 
     /// Out 30 points across the glass and back again, a point a frame: 60 frames, each of
@@ -57,9 +57,9 @@ private struct BusyBoard {
 
     /// One frame of a finger dragging `ref` `dx` across the glass since it landed.
     func drag(_ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
-        guard let (element, placement) = store.resolve(ref) else { return }
-        drags.moveElement(ref, from: element.frame, placement: placement, by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model) {
-            drags.moveRule(for: element, placement: placement, on: store.screen(screen), model: model)
+        guard store.placed(ref) != nil else { return }
+        drags.moveNode(ref, by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model) { placed in
+            drags.moveRule(for: placed, model: model)
         }
     }
 }
@@ -307,9 +307,9 @@ struct CanvasDragWorkTests {
         let board = BusyBoard()
         let coordinator = InkCanvas.Coordinator(model: board.model)
         board.model.ink = coordinator
-        let drawing = try #require(board.store.floating.first { $0.element.kind == .drawing })
+        let drawing = try #require(board.store.tree.canvas.first { $0.kind == .drawing })
         let ref = DesignStore.ElementRef(host: .canvas, element: drawing.id)
-        let area = drawing.canvasFrame
+        let area = try #require(board.store.canvasRect(of: drawing.id))
         /// Its strokes, wherever they are now: those in its row that start past `x`.
         func strokes(startingPast x: CGFloat) -> Int {
             coordinator.documentCanvas.drawing.strokes.filter { stroke in
@@ -344,6 +344,7 @@ struct CanvasDragWorkTests {
         drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
         // The group is written alone on each of 60 frames, and its three lines ride along in it
         // (plan 2, call 13).
+        print("BENCH drag group frames=60 writes=\(groupWrites)")
         #expect(groupWrites == 60, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
         #expect(!board.store.isEditing)
 
@@ -353,6 +354,7 @@ struct CanvasDragWorkTests {
         for dx in BusyBoard.outAndBack { board.drag(drags, board.lines[20], by: CGFloat(dx), owner: other) }
         let lineWrites = ListWork.elementsWritten - before
         drags.dropElement(board.lines[20], findsNewHome: true, owner: other, model: board.model)
+        print("BENCH drag line frames=60 writes=\(lineWrites)")
         #expect(lineWrites == 60, "elements written during a 60-frame drag of one line: \(lineWrites)")
     }
 
@@ -366,12 +368,12 @@ struct CanvasDragWorkTests {
         board.drag(drags, board.lines[5], by: 10, owner: owner)
         let checks = CanvasWork.dragChecks
         for index in 20..<23 {
-            board.store.asOwnStep { board.store.update(board.lines[index]) { $0.text = "Changed" } }
+            board.store.asOwnStep { board.store.update(board.lines[index].element) { $0.content.text = "Changed" } }
         }
         #expect(CanvasWork.dragChecks - checks == 1)
         for _ in 0..<5 { await Task.yield() }
         #expect(drags.isDragging, "what it drags is still there")
-        board.store.asOwnStep { board.store.update(board.lines[5]) { $0.isLocked = true } }
+        board.store.asOwnStep { board.store.update(board.lines[5].element) { $0.isLocked = true } }
         for _ in 0..<5 { await Task.yield() }
         #expect(!drags.isDragging, "locked meanwhile, it is let go of")
     }
@@ -402,7 +404,7 @@ extension HostedWindowSuites {
         private func waitForTargetsToSettle(nudging ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws {
             for step in 0..<40 {
                 let before = targetsBuilt(in: model.store)
-                model.store.update(ref) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
+                model.store.update(ref.element) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
                 try await Task.sleep(for: .milliseconds(50))
                 if targetsBuilt(in: model.store) - before <= 1 { return }
             }
@@ -512,7 +514,7 @@ extension HostedWindowSuites {
             try await settle(view)
             let start = targetsBuilt(in: board.store)
             for frame in 1...60 {
-                board.store.update(board.lines[5]) { $0.frame.origin.x = 20 + CGFloat(frame) }
+                board.store.update(board.lines[5].element) { $0.frame.origin.x = 20 + CGFloat(frame) }
                 view.layoutIfNeeded()
                 try await Task.sleep(for: .milliseconds(4))
             }

@@ -31,71 +31,71 @@ private func cross(at origin: CGPoint, size: CGFloat = 60) -> [PKStroke] {
 struct InkOnTheTreeTests {
     @Test func aStrokeMakesADrawingNodeOnTheCanvas() throws {
         var sync = DrawingSync()
-        var content = DesignContent()
+        var content = TreeContent()
         let strokes = cross(at: CGPoint(x: 400, y: 300))
 
-        sync.changes(for: strokes, in: content.tree).apply(to: &content)
+        sync.changes(for: strokes, in: content).apply(to: &content)
 
-        let node = try #require(content.tree.canvas.last)
-        #expect(content.tree.canvas.count == 1)
+        let node = try #require(content.canvas.last)
+        #expect(content.canvas.count == 1)
         #expect(node.kind == .drawing)
         #expect(node.scale == 1)
         #expect(node.frame == InkGeometry.bounds(of: strokes))
         #expect(node.content.ink != nil)
         #expect(node.canvasStrokes.count == 2)
         #expect(sync.drawing(owning: strokes[0].key) == node.id)
-        #expect(DrawingSync.onCanvas(content.tree).map(\.id) == [node.id])
+        #expect(DrawingSync.onCanvas(content).map(\.id) == [node.id])
     }
 
     @Test func aStrokeNearADrawingJoinsIt() throws {
         var sync = DrawingSync()
-        var content = DesignContent()
+        var content = TreeContent()
         var strokes = cross(at: CGPoint(x: 400, y: 300))
-        sync.changes(for: strokes, in: content.tree).apply(to: &content)
-        let first = try #require(content.tree.canvas.first)
+        sync.changes(for: strokes, in: content).apply(to: &content)
+        let first = try #require(content.canvas.first)
 
         strokes.append(stroke(from: CGPoint(x: 430, y: 300), to: CGPoint(x: 430, y: 360)))
-        sync.changes(for: strokes, in: content.tree).apply(to: &content)
+        sync.changes(for: strokes, in: content).apply(to: &content)
 
-        #expect(content.tree.canvas.map(\.id) == [first.id])
-        #expect(content.tree.canvas[0].canvasStrokes.count == 3)
-        #expect(content.tree.canvas[0].content.ink != first.content.ink)
+        #expect(content.canvas.map(\.id) == [first.id])
+        #expect(content.canvas[0].canvasStrokes.count == 3)
+        #expect(content.canvas[0].content.ink != first.content.ink)
     }
 
     @Test func aDrawingWithNoStrokesLeftGoes() throws {
         var sync = DrawingSync()
-        var content = DesignContent()
+        var content = TreeContent()
         let near = cross(at: CGPoint(x: 400, y: 300))
         let far = cross(at: CGPoint(x: 900, y: 700))
-        sync.changes(for: near + far, in: content.tree).apply(to: &content)
-        let gone = try #require(content.tree.canvas.first?.id)
+        sync.changes(for: near + far, in: content).apply(to: &content)
+        let gone = try #require(content.canvas.first?.id)
 
-        let changes = sync.changes(for: far, in: content.tree)
+        let changes = sync.changes(for: far, in: content)
         changes.apply(to: &content)
 
         #expect(changes.removed == [gone])
-        #expect(content.tree.canvas.count == 1)
-        #expect(content.tree.canvas.first?.id != gone)
+        #expect(content.canvas.count == 1)
+        #expect(content.canvas.first?.id != gone)
     }
 
     @Test func aTurnedDrawingKeepsItsAngleWhenExtended() throws {
         var sync = DrawingSync()
-        var content = DesignContent()
+        var content = TreeContent()
         var turned = try #require(LayerNode.drawing(cross(at: CGPoint(x: 400, y: 300))))
         turned.rotation = 20
-        content.tree.canvas.append(turned)
-        let shown = sync.strokes(showing: content.tree, on: [])
+        content.canvas.append(turned)
+        let shown = sync.strokes(showing: content, on: [])
         var strokes = try #require(shown)
         let before = try #require(InkGeometry.bounds(of: strokes))
 
         // A stroke across the top of the cross as it lies turned on the canvas.
         let added = stroke(from: CGPoint(x: before.minX, y: before.minY - 4), to: CGPoint(x: before.maxX, y: before.minY - 4))
         strokes.append(added)
-        let changes = sync.changes(for: strokes, in: content.tree)
+        let changes = sync.changes(for: strokes, in: content)
         changes.apply(to: &content)
 
-        let node = try #require(content.tree.canvas.first)
-        #expect(content.tree.canvas.count == 1)
+        let node = try #require(content.canvas.first)
+        #expect(content.canvas.count == 1)
         #expect(node.rotation == 20, "no double turn")
         let now = try #require(InkGeometry.bounds(of: node.canvasStrokes))
         let wanted = try #require(InkGeometry.bounds(of: strokes))
