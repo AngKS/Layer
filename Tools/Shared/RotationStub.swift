@@ -1,7 +1,7 @@
 // A stand-in for the parts of `Rotation` that the files the benchmark harnesses compile
 // use: CanvasPicture.swift (`shown`) and Design.swift (`kept`). The real enum, in
 // Layer/Model/Rotation.swift, also turns rects for the canvas and so needs much of the
-// app's model (`ElementLayout`, `Viewport`, `DesignElement`). These functions are copied
+// app's model (`ElementLayout`, `Viewport`). These functions are copied
 // from it unchanged, so that an angle is described and kept exactly as the app does it;
 // keep them in step with Rotation.swift.
 enum Rotation {

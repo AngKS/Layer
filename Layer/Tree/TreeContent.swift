@@ -2,8 +2,8 @@ import CoreGraphics
 import Foundation
 
 // The version-4 design: screens that each hold a root node, the canvas's own nodes, and
-// the file they are saved in. It sits beside `DesignContent`, which the app still uses.
-// Like it, everything is read leniently and what this version doesn't know is kept.
+// the file they are saved in. Everything is read leniently and what this version doesn't
+// know is kept.
 
 /// One device screen on the canvas. Its root is a group the size of the device, which
 /// holds everything on the screen.

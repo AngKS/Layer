@@ -1,9 +1,8 @@
-// Stand-ins for two types the app defines in files this harness can't compile for macOS:
-// `RGBColor` lives in Layer/Model/Theme.swift, which imports UIKit; `DesignContent` lives
-// in Layer/Document/DesignFile.swift, which imports PencilKit. Neither framework exists on
-// macOS, and the sketch classifier this harness benchmarks never touches either type's real
-// behaviour (colour rendering, file reading): it only needs them to exist so that
-// Layer/Model/Design.swift and Layer/Sketch/SketchInterpreter.swift type-check.
+// Stand-ins for types the app defines in files this harness can't compile for macOS:
+// `RGBColor` and `Theme` live in Layer/Model/Theme.swift, which imports UIKit, a framework
+// macOS doesn't have, and the sketch classifier this harness benchmarks never touches their
+// real behaviour (colour rendering): it only needs them to exist so that
+// Layer/Model/Design.swift and the components' catalogue type-check.
 //
 // See the memory note on testing Apple Intelligence natively: a harness compiling
 // Layer/Sketch/*.swift plus a stub for RGBColor and Theme already measured the model this
@@ -42,13 +41,4 @@ struct ModelChoice: Hashable, Codable, Sendable {}
 
 enum ModelPreferences {
     static let defaultChoice = ModelChoice()
-}
-
-/// Just enough of `DesignContent` for `SketchPrompt.describe(board:)` to type-check. The
-/// benchmark never names boards, so this is never actually called.
-struct DesignContent: Sendable {
-    var screens: [DesignScreen] = []
-    var floating: [FloatingElement] = []
-    var title: String?
-    var canvas = CanvasSettings()
 }

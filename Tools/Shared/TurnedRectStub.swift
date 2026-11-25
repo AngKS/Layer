@@ -5,8 +5,7 @@ import Foundation
 // edits and layout use, and for the `Rotation.rotate` it turns its corners with. The real file
 // also turns rects for the canvas (`Viewport`), which needs much of the app's model. What is
 // here is copied from it unchanged, less `corner(_:)` and the `Viewport` extension; keep it in
-// step with Rotation.swift. `DesignElement.shapeBounds` is copied too, for ElementLayout.swift.
-// `corner(_:)` takes an `ElementLayout.Corner`, so it is in
+// step with Rotation.swift. `corner(_:)` takes an `ElementLayout.Corner`, so it is in
 // Tools/SketchBenchmarkHarness/TurnedRectCorner.swift, beside the one harness that compiles
 // ElementLayout.swift: every file here is copied into the screen harness, which doesn't.
 extension Rotation {
@@ -73,12 +72,4 @@ struct TurnedRect: Equatable, Sendable {
         let rect = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         return TurnedRect(rect: rect, degrees: degrees)
     }
-}
-
-extension DesignElement {
-    /// How far it is turned, 0 when upright.
-    var resolvedRotation: Double { rotation ?? 0 }
-
-    /// The upright box round the turned frame, in its host's points. The frame itself when upright.
-    var shapeBounds: CGRect { TurnedRect(rect: frame, degrees: resolvedRotation).bounds }
 }

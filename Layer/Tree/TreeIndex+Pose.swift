@@ -37,8 +37,7 @@ extension TreeIndex {
         static let host = OwnSpace(toHost: .identity, origin: .zero, degrees: 0, isUpright: true)
 
         /// A child of the node this is the space of: its upright frame in the host's own points, centred
-        /// on its turned shape's centre, its summed angle, and its own space. The projection poses its
-        /// elements through this too (`TreeProjection.Place`), so a node and its element agree exactly.
+        /// on its turned shape's centre, its summed angle, and its own space.
         func placing(_ node: LayerNode) -> Placed {
             let own = node.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
             let size = node.frame.size

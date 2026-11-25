@@ -1,8 +1,0 @@
-# Lane B's allowlist for scripts/check-flat-model.sh: files whose tier-1 hits are allowed until their owner ports them.
-# One path per line, from the repository's root; after a # is a note. Lane B only ever takes lines out (plan 6, call 1),
-# and takes a file's line out once its last hit has gone: the gate fails on a stale line.
-# The owners are the ledger's table (plan 6, Task 1).
-
-# Task 11, by the coordinator's ruling on plan 6's Task 3: a new test whose only flat read is the proof that a lowering
-# counter is live, retired under (s). The one line lane B adds.
-LayerTests/SiriOnTheTreeTests.swift              # (s): readingDoesNotLower's store.screens read; Task 11 retires it

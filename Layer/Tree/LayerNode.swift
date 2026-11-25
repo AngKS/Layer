@@ -2,9 +2,8 @@ import CoreGraphics
 import Foundation
 
 /// One node of a design's semantic tree: a thing on the canvas, or a container holding
-/// more of them. It sits beside `DesignElement`, which the app still uses; nothing reads
-/// a `LayerNode` yet but the tree's own code. Everything here builds on macOS too, so no
-/// UIKit and no SwiftUI: every type that could clash with SwiftUI's is nested below.
+/// more of them. Everything here builds on macOS too, so no UIKit and no SwiftUI: every
+/// type that could clash with SwiftUI's is nested below.
 struct LayerNode: Identifiable, Equatable, Sendable, Codable {
     var id = UUID()
     var kind: ElementKind
@@ -126,7 +125,7 @@ extension LayerNode {
         var isOn = true
         var value: Double?
         var buttonLook: ButtonLook?
-        /// Never coded: ink is saved apart from the design, as `DesignElement`'s is.
+        /// Never coded: ink is saved apart from the design (`DesignFile`).
         var ink: Data?
     }
 

@@ -2,8 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// The rules a design is kept to after every change, undo, redo and read: its structure first,
-/// then the layout of what changed. They take over from `DesignContent.keepGroupsSound()` when
-/// the store holds a `TreeContent` (plan 2); until then nothing in the app runs them.
+/// then the layout of what changed. The store runs them inside each of its changes.
 ///
 /// The structure, in order:
 /// 1. Each screen's root is kept to its device (built-in or the design's own): a group at the
