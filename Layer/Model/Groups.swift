@@ -377,13 +377,17 @@ extension DesignStore {
     /// column, grid or overlay is taken apart as a group is. Read from the tree.
     ///
     /// Taking apart a row, column or grid the structure pass made declines what it held, so
-    /// that the pass never puts it back (plan 5, call 11). The marks are no step of their own.
+    /// that the pass never puts it back (plan 5, call 11). The marks are part of the step
+    /// (plan 5's final review, A9): undoing it puts the container back with nothing declined.
     @discardableResult
     func ungroup(_ ref: ElementRef) -> CanvasSelection? {
         guard let item = placed(ref), item.node.isContainer else { return nil }
         let wasThePasses = item.node.sketch?.decidedBy == .structure
-        let members = unwrap(ref.element)
-        if wasThePasses { declineStructure(members) }
+        var members: [UUID] = []
+        asOneStep {
+            members = unwrap(ref.element)
+            if wasThePasses { apply { $0.tree = Self.declining(Set(members), in: $0.tree) } }
+        }
         return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0)) })
     }
 

@@ -29,20 +29,26 @@ extension AppModel {
     /// The pass over `nodes`' receiving containers (call 1): each one's parent that is free and is a screen's root or a
     /// container with a sketch, and each new card, whose children count as new; inside out, so that a new card's column
     /// is built before the root it lies on is looked at. What it is sure of is built, in order, as one step, or as part of
-    /// the step under way (a reading's). Of what it is less sure of, the surest is offered: one offer per pass. It reads
-    /// only the tree. The end of a batch calls it.
+    /// the step under way (a reading's). Nothing moves more than 8 pt in it all: a structure an outer container would
+    /// build is measured from where what an inner one moved lay when the pass began (plan 5's final review, A1). Of
+    /// what it is less sure of, the surest is offered: one offer per pass. It reads only the tree. The end of a batch
+    /// calls it.
     func structurePass(over nodes: [UUID]) {
         let receiving = receivingContainers(of: nodes)
         guard !receiving.isEmpty else { return }
         let tokens = store.tree.settings.tokens
+        let started = startingPlaces(inside: receiving.map(\.id))
         var offered: StructureInference.Structure?
         var built: [UUID] = []
         keepingTheSuggestion {
             store.asOwnStep {
                 for container in receiving {
-                    guard let parent = store.node(container.id), let depth = store.index[container.id]?.depth else { continue }
+                    guard let parent = store.node(container.id), let entry = store.index[container.id] else { continue }
+                    // From the screen's points to the container's own, which nothing in the pass has moved yet.
+                    let fromScreen = entry.toHost.inverted()
                     let decisions = StructureInference.infer(in: parent, new: container.new, grows: structuresThatMayGrow(),
-                                                             tokens: tokens, depth: depth)
+                                                             tokens: tokens, depth: entry.depth,
+                                                             started: started.mapValues { $0.applying(fromScreen) })
                     for decision in decisions {
                         switch decision {
                         case .apply(let structure):
@@ -67,10 +73,14 @@ extension AppModel {
         structurePass(over: nodes)
     }
 
-    /// Builds what is on offer, as a step of its own: "Make Row", "Make Column" or "Make Grid".
+    /// Builds what is on offer, as a step of its own: "Make Row", "Make Column" or "Make Grid". One that takes the place
+    /// of a container the pass made is built only while that container is as it was built (Task 6 m1): one the person
+    /// has changed since, by putting a thing in it or naming it, is theirs, and nothing is built.
     func acceptStructureOffer() {
         guard let offer = structureOffer else { return }
         dismissStructureOffer()
+        let mayGrow = structuresThatMayGrow()
+        guard offer.structure.replacing.allSatisfy(mayGrow.contains) else { return }
         let edit = store.beginEdit(by: .app)
         store.name(edit, offer.structure.kind.stepName)
         let built = store.act(for: edit) { store.build(offer.structure) }
@@ -100,16 +110,33 @@ extension AppModel {
         structureOfferExpiry = nil
         structureOffer = nil
         structureOfferPlaces = [:]
+        structureOfferTimeLeft = StructureConventions.offerLifetime
+        structureOfferShownSince = nil
     }
 
-    /// Starts the offer's time once it shows: now, or once the "Did you mean" it waits for has gone (call 12).
+    /// Starts the offer's time once it shows, or goes on with what it has left: now, or once the "Did you mean" it waits
+    /// for has gone (call 12).
     func startStructureOfferClock() {
         guard structureOffer != nil, suggestion == nil, structureOfferExpiry == nil else { return }
+        let left = structureOfferTimeLeft
+        structureOfferShownSince = .now
         structureOfferExpiry = Task { [weak self] in
-            try? await Task.sleep(for: StructureConventions.offerLifetime)
+            try? await Task.sleep(for: left)
             guard !Task.isCancelled else { return }
             withAnimation(.smooth(duration: 0.25)) { self?.dismissStructureOffer() }
         }
+    }
+
+    /// Stops the offer's time while a "Did you mean" hides it (call 12, Task 9 m2), keeping what it has left: it goes
+    /// on once that has gone (`startStructureOfferClock`).
+    func pauseStructureOfferClock() {
+        guard let expiry = structureOfferExpiry else { return }
+        expiry.cancel()
+        structureOfferExpiry = nil
+        if let since = structureOfferShownSince {
+            structureOfferTimeLeft = max(.zero, structureOfferTimeLeft - (ContinuousClock.now - since))
+        }
+        structureOfferShownSince = nil
     }
 
     /// Whether a member of the offer, or its screen, has changed or gone since it was offered.
@@ -149,6 +176,26 @@ extension AppModel {
         return order.enumerated()
             .sorted { (-(index[$0.element]?.depth ?? 0), $0.offset) < (-(index[$1.element]?.depth ?? 0), $1.offset) }
             .map { ($0.element, new[$0.element] ?? []) }
+    }
+
+    /// Where everything inside each of `containers` but a screen's root lies on its screen: each node's own origin there.
+    /// The pass looks at containers inside out, so that what an inner one builds moves only what such a container holds,
+    /// and an outer one measures how far its structures move from here (A1).
+    private func startingPlaces(inside containers: [UUID]) -> [UUID: CGPoint] {
+        let index = store.index, tree = store.tree
+        var places: [UUID: CGPoint] = [:]
+        func visit(_ node: LayerNode, toScreen: CGAffineTransform) {
+            for child in node.children {
+                let own = child.transformToParent.concatenating(toScreen)
+                places[child.id] = CGPoint.zero.applying(own)
+                visit(child, toScreen: own)
+            }
+        }
+        for id in containers {
+            guard let entry = index[id], !entry.path.isEmpty, let node = index.node(id, in: tree) else { continue }
+            visit(node, toScreen: entry.toHost)
+        }
+        return places
     }
 
     /// The containers this model built that are still exactly as it built them (F10): those may grow (call 2).

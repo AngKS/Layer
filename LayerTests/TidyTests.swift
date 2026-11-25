@@ -196,6 +196,90 @@ struct TidyTests {
         #expect(!undo.canUndo, "one step")
     }
 
+    // MARK: - What rides on a picture (plan 5's final review, A5)
+
+    /// A caption and a button laid on a photo stay on it, in the same place, when tidying moves the photo into its column,
+    /// and in front of the column, where the photo doesn't cover them (A2). Ported from ScreenTidy's
+    /// `aCaptionOnAnImageRidesWithIt`, retired under (o), with the title, photo and body on one margin, since the pass
+    /// builds only what lines up.
+    @Test func aCaptionOnAPictureRidesWithIt() throws {
+        let title = node(.title, CGRect(x: 20, y: 80, width: 353, height: 40))
+        let photo = node(.image, CGRect(x: 20, y: 140, width: 353, height: 200))
+        let caption = node(.text, CGRect(x: 36, y: 290, width: 200, height: 34))
+        let button = node(.button, CGRect(x: 140, y: 180, width: 100, height: 40))
+        let body = node(.body, CGRect(x: 20, y: 370, width: 353, height: 44))
+        let (model, screen, _) = makeModel([title, photo, caption, button, body])
+
+        #expect(!model.store.tidy(screen).isEmpty)
+
+        let root = try root(of: screen, in: model)
+        #expect(Array(root.children.map(\.id).dropFirst()) == [caption.id, button.id], "in front of the column")
+        #expect(root.children.first?.children.map(\.id) == [title.id, photo.id, body.id])
+        let moved = try #require(model.store.placed(photo.id)?.frame)
+        #expect(moved.minY != photo.frame.minY, "the photo moved")
+        for rider in [caption, button] {
+            let frame = try #require(model.store.placed(rider.id)?.frame)
+            #expect(frame == rider.frame.offsetBy(dx: moved.minX - photo.frame.minX, dy: moved.minY - photo.frame.minY))
+        }
+    }
+
+    /// A label on a shape goes where the shape goes. Ported from ScreenTidy's `whatRidesOnAShapeStaysWithIt`, retired
+    /// under (o): the shape is no longer left out of the layout, so the label rides it instead.
+    @Test func whatRidesOnAShapeStaysWithIt() throws {
+        let title = node(.title, CGRect(x: 20, y: 90, width: 353, height: 40))
+        let field = node(.textField, CGRect(x: 20, y: 150, width: 353, height: 48))
+        let shape = node(.shape, CGRect(x: 20, y: 230, width: 353, height: 120))
+        let label = node(.text, CGRect(x: 40, y: 270, width: 200, height: 30))
+        let button = node(.button, CGRect(x: 20, y: 380, width: 353, height: 50))
+        let (model, screen, _) = makeModel([title, field, shape, label, button])
+
+        #expect(!model.store.tidy(screen).isEmpty)
+
+        let root = try root(of: screen, in: model)
+        #expect(root.children.first?.children.map(\.id) == [title.id, field.id, shape.id, button.id])
+        #expect(root.children.last?.id == label.id, "in front of the shape")
+        let moved = try #require(model.store.placed(shape.id)?.frame)
+        #expect(moved.minY != shape.frame.minY, "the shape moved")
+        #expect(model.store.placed(label.id)?.frame
+                == label.frame.offsetBy(dx: moved.minX - shape.frame.minX, dy: moved.minY - shape.frame.minY))
+    }
+
+    /// What lies on a locked picture stays where it is, with the picture, while the rest is tidied. Ported from
+    /// ScreenTidy's `whatRidesOnALockedPictureStaysPut`, retired under (o), with the rest on one margin.
+    @Test func whatRidesOnALockedPictureStaysPut() throws {
+        let title = node(.title, CGRect(x: 20, y: 80, width: 353, height: 40))
+        let field = node(.textField, CGRect(x: 20, y: 140, width: 353, height: 48))
+        let button = node(.button, CGRect(x: 20, y: 210, width: 353, height: 50))
+        var picture = node(.image, CGRect(x: 20, y: 300, width: 353, height: 200))
+        picture.isLocked = true
+        let caption = node(.text, CGRect(x: 40, y: 450, width: 200, height: 30))
+        let (model, screen, _) = makeModel([title, field, button, picture, caption])
+
+        #expect(!model.store.tidy(screen).isEmpty)
+
+        #expect(try root(of: screen, in: model).children.first?.children.map(\.id) == [title.id, field.id, button.id])
+        #expect(model.store.placed(picture.id)?.frame == picture.frame)
+        #expect(model.store.placed(caption.id)?.frame == caption.frame)
+    }
+
+    /// A caption that only strays over a picture's edge doesn't ride it, and stays where it was. Ported from ScreenTidy's
+    /// `anAccidentalOverlapIsStillSeparated`, retired under (o), as far as riding goes: tidying no longer moves what isn't
+    /// laid out, so it isn't moved off the picture either. Six tenths of it lie on the photo, short of nine.
+    @Test func aCaptionHalfOverAPictureDoesNotRide() throws {
+        let title = node(.title, CGRect(x: 20, y: 80, width: 353, height: 40))
+        let photo = node(.image, CGRect(x: 20, y: 140, width: 353, height: 200))
+        let caption = node(.text, CGRect(x: 300, y: 200, width: 120, height: 40))
+        let body = node(.body, CGRect(x: 20, y: 380, width: 353, height: 44))
+        let (model, screen, _) = makeModel([title, photo, caption, body])
+
+        #expect(!model.store.tidy(screen).isEmpty)
+
+        let column = try root(of: screen, in: model).children.first { $0.kind == .group }
+        #expect(column?.children.map(\.id) == [title.id, photo.id, body.id])
+        #expect(model.store.placed(photo.id)?.frame.minY != photo.frame.minY, "the photo moved")
+        #expect(model.store.placed(caption.id)?.frame == caption.frame)
+    }
+
     // MARK: - Its cost
 
     /// Six hundred texts and images, 120 × 80 on a 140 × 100 lattice, each a few points off its place: Task 8 measured

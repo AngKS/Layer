@@ -418,3 +418,9 @@ one band of at most 64 things at a time (`StructureConventions.gridSearchedToget
 smaller grids than one search over all of it did (51 decisions where Task 8 counted 46). In the simulator, unoptimised, the whole of voice's tidy of those 600
 things (`DesignStore.tidy`: the pass and building the 51 structures it is sure of) takes 166.8 to 169.7 ms over three runs,
 under `tidyingSixHundredThingsIsQuick`'s 300 ms.
+
+The bands cut the sketch pass's grid search too, not only tidy's (plan 5's final review, M3 of half A, Task 10 m1): they
+apply to any neighbourhood of more than 64 leaves and cards, and a batch on a busy screen has one (the always-on heavy
+reading budget's median neighbourhood is over 90). A band that is half full ends at the first clear horizontal line, which
+can be the line between two rows of a grid, so a grid drawn cell by cell on such a screen can be read as rows rather than
+one grid.

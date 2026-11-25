@@ -38,8 +38,9 @@ enum StructureInference {
         /// real one when it builds it. For `.cardColumn` it is the card itself, with its new layout and padding.
         var container: LayerNode
         var confidence: Double
-        /// The furthest any member moves, as proposed. Members are upright and keep their sizes, so every corner
-        /// moves as the origin does; what a row proposed just before holds counts from where it is now.
+        /// The furthest any member, or anything in one, moves, as proposed. Members are upright and keep their sizes, so
+        /// every corner moves as the origin does; what a row proposed just before holds counts from where it is now, and
+        /// what a build earlier in the step moved (`infer`'s `started`) from where it lay when the step began.
         var movement: CGFloat
 
         var title: String {
@@ -56,10 +57,14 @@ enum StructureInference {
 
     /// Pure and deterministic. `parent` as it is now; `new` the batch's nodes in it (a new card's: all it holds);
     /// `grows` the containers the pass made that may grow (call 2); `depth` how deep `parent` sits, as `TreeIndex`
-    /// counts it (a screen's root is 0), so that nothing is built past depth 32 (F9). Tidying, every arrangeable child
-    /// counts as new, whatever `new` says. In the order to apply: inner structures first.
+    /// counts it (a screen's root is 0), so that nothing is built past depth 32 (F9). `started` is where nodes inside
+    /// `parent`'s children that a build earlier in the step may have moved lay when the step began, each one's own
+    /// origin in `parent`'s space: the 8 pt limit is on the furthest anything moves in the step, a card's column and the
+    /// row the card then goes into together (plan 5's final review, A1). Tidying, every arrangeable child counts as new,
+    /// whatever `new` says. In the order to apply: inner structures first.
     static func infer(in parent: LayerNode, new: Set<UUID>, grows: Set<UUID> = [], tokens: DesignTokens,
-                      mode: Mode = .sketch, measure: TextMeasure = .shared, depth: Int = 0) -> [Decision] {
+                      mode: Mode = .sketch, measure: TextMeasure = .shared, depth: Int = 0,
+                      started: [UUID: CGPoint] = [:]) -> [Decision] {
         guard parent.isContainer, parent.resolvedLayout == .free else { return [] }
         let new = mode == .tidy ? Set(parent.children.filter(\.isArrangeable).map(\.id)) : new
         let near = neighbourhood(of: parent, new: new)
@@ -67,7 +72,8 @@ enum StructureInference {
         record(near.count, for: parent.id)
         #endif
         guard !near.isEmpty else { return [] }
-        return Pass(parent: parent, new: new, grows: grows, tokens: tokens, mode: mode, measure: measure, depth: depth)
+        return Pass(parent: parent, new: new, grows: grows, tokens: tokens, mode: mode, measure: measure, depth: depth,
+                    started: started)
             .decisions(near)
     }
 
@@ -86,18 +92,22 @@ enum StructureInference {
 
     /// `parent` with `structure` built in it. The containers it replaces are opened first, their members where they
     /// are on screen. Then its members, as they are now, each `.fixed` at its size and at the proposed frame, go
-    /// inside the proposed container (its id kept) at the frontmost member's slot. For `.cardColumn`, `parent` is the
-    /// card, which takes the proposed layout and padding and holds its children in the proposed order and frames.
-    /// Nil when a member is gone, no longer `parent`'s child, or not arrangeable, when a container it replaces isn't
-    /// there, or when the container is already there.
-    static func applying(_ structure: Structure, to parent: LayerNode) -> LayerNode? {
+    /// inside the proposed container (its id kept), at the frontmost member's slot where that hides nothing seen
+    /// (`slot`). With `carryingRiders` (voice's tidy), what lies on a member goes where it goes (`riders`). For
+    /// `.cardColumn`, `parent` is the card, which takes the proposed layout and padding and holds its children in the
+    /// proposed order and frames. Nil when a member is gone, no longer `parent`'s child, or not arrangeable, when a
+    /// container it replaces isn't there or holds something the structure doesn't take, or when the container is
+    /// already there.
+    static func applying(_ structure: Structure, to parent: LayerNode, carryingRiders: Bool = false) -> LayerNode? {
         if structure.kind == .cardColumn { return applyingInside(structure, card: parent) }
         var parent = parent
-        for id in structure.replacing {
-            guard let place = parent.children.firstIndex(where: { $0.id == id }), open(place, in: &parent) else { return nil }
-        }
         let members = structure.members
-        guard !members.isEmpty, Set(members).count == members.count,
+        let taken = Set(members)
+        for id in structure.replacing {
+            guard let place = parent.children.firstIndex(where: { $0.id == id }), open(place, in: &parent, takenBy: taken)
+            else { return nil }
+        }
+        guard !members.isEmpty, taken.count == members.count,
               !parent.children.contains(where: { $0.id == structure.container.id }) else { return nil }
         var places: [Int] = []
         for id in members {
@@ -112,17 +122,103 @@ enum StructureInference {
             member.frame.origin = proposed[id] ?? member.frame.origin
             return member
         }
-        // The container takes the frontmost member's place, and the others go: a child this build couldn't read
-        // keeps its place among those that stay.
-        let front = places.max() ?? 0
-        let others = places.filter { $0 != front }
-        var result = parent
-        TreeRules.keepUnreadPlaces(in: &result, removing: others)
+        // Where each member goes in the parent's space: the container is upright.
+        let corner = container.frame.origin
+        let laid = Dictionary(zip(places, container.children.map { $0.frame.offsetBy(dx: corner.x, dy: corner.y) }),
+                              uniquingKeysWith: { first, _ in first })
         var children = parent.children
-        children[front] = container
-        for place in others.sorted(by: >) { children.remove(at: place) }
-        result.children = children
+        if carryingRiders {
+            for (rider, member) in riders(of: places, in: children) {
+                let from = children[member].frame.origin, to = laid[member]?.origin ?? from
+                children[rider].frame = children[rider].frame.offsetBy(dx: to.x - from.x, dy: to.y - from.y)
+            }
+        }
+        let goesAt = slot(for: places, laidAt: laid, among: parent.children, now: children)
+        // A child this build couldn't read keeps its place among those that stay.
+        let front = places.max() ?? 0
+        let isMember = Set(places)
+        let staying = children.indices.filter { !isMember.contains($0) }
+        var result = parent
+        if goesAt == staying.count(where: { $0 < front }) {
+            // The container takes the frontmost member's place, and the others go.
+            let others = places.filter { $0 != front }
+            TreeRules.keepUnreadPlaces(in: &result, removing: others)
+            children[front] = container
+            for place in others.sorted(by: >) { children.remove(at: place) }
+            result.children = children
+        } else {
+            TreeRules.keepUnreadPlaces(in: &result, removing: places)
+            makeRoomForUnread(in: &result, beforeRead: goesAt)
+            result.children = staying.map { children[$0] }
+            result.children.insert(container, at: goesAt)
+        }
         return result
+    }
+
+    /// Where a container holding the children at `members` goes among those that stay (0: behind them all; their count:
+    /// in front), as a sketched card goes (plan 5's Task 5, round 5; final review A2): at the frontmost member's slot,
+    /// moved as little as needed among the slots where nothing seen is wholly hidden by one thing. It goes in front of
+    /// what would hide whole a member that was seen, and behind what a member would hide whole that was seen. Where no
+    /// slot does that, the frontmost member's stands. `before` is the children as they were, `now` as they are once
+    /// riders have moved, and `laid` where each member goes. Each counts as the box round its turned shape; a hidden
+    /// one counts for nothing. The container draws nothing of its own.
+    private static func slot(for members: [Int], laidAt laid: [Int: CGRect], among before: [LayerNode],
+                             now: [LayerNode]) -> Int {
+        let was = before.map(shapeBox)
+        let shape = now.indices.map { laid[$0] ?? shapeBox(now[$0]) }
+        let front = members.max() ?? 0
+        let isMember = Set(members)
+        let staying = before.indices.filter { !isMember.contains($0) }
+        // Only what meets the members can cover one or be covered by one: the rest are passed over at once.
+        let span = members.reduce(CGRect.null) { $0.union(shape[$1]) }
+        func isDrawn(_ at: Int) -> Bool { !before[at].isHidden }
+        /// Seen before it was built: drawn, and not wholly under one drawn thing in front of it. Asked only of what one
+        /// thing wholly covers, which is seldom: it looks at everything in front.
+        func wasSeen(_ at: Int) -> Bool {
+            isDrawn(at) && !before.indices.contains { over in over > at && isDrawn(over) && was[over].contains(was[at]) }
+        }
+        let ruled = staying.count { $0 < front }
+        let lowest = 1 + (staying.lastIndex { at in
+            isDrawn(at) && meets(shape[at], span) && members.contains { shape[at].contains(shape[$0]) && wasSeen($0) }
+        } ?? -1)
+        let highest = staying.firstIndex { at in
+            meets(shape[at], span) && members.contains { member in isDrawn(member) && shape[member].contains(shape[at]) }
+                && wasSeen(at)
+        } ?? staying.count
+        return lowest <= highest ? min(max(ruled, lowest), highest) : ruled
+    }
+
+    /// What rides on a member (plan 5's final review, A5): each child that stays, the pass may move, and lies at least
+    /// `StructureConventions.enclosedShare` of its area on a member's shape, with the smallest such member, by place.
+    private static func riders(of members: [Int], in children: [LayerNode]) -> [(rider: Int, member: Int)] {
+        func area(_ box: CGRect) -> CGFloat { box.isNull ? 0 : box.width * box.height }
+        let shapes = children.map(shapeBox)
+        let isMember = Set(members)
+        let span = members.reduce(CGRect.null) { $0.union(shapes[$1]) }
+        return children.indices.compactMap { at -> (rider: Int, member: Int)? in
+            guard !isMember.contains(at), meets(shapes[at], span), children[at].isArrangeable else { return nil }
+            let own = area(shapes[at])
+            guard own > 0 else { return nil }
+            let hosts = members.filter {
+                !children[$0].isHidden && area(shapes[$0].intersection(shapes[at])) >= own * StructureConventions.enclosedShare
+            }
+            return hosts.min { area(shapes[$0]) < area(shapes[$1]) }.map { (rider: at, member: $0) }
+        }
+    }
+
+    /// Each child this build couldn't read at or after the place of the read one at `slot` moves on by one, for a node put
+    /// in just before that one (after them all, at their count).
+    private static func makeRoomForUnread(in node: inout LayerNode, beforeRead slot: Int) {
+        guard !node.unreadChildren.isEmpty else { return }
+        let unread = Set(node.unreadChildren.map(\.index))
+        var at = 0, read = 0
+        while unread.contains(at) || read < slot {
+            if !unread.contains(at) { read += 1 }
+            at += 1
+        }
+        for index in node.unreadChildren.indices where node.unreadChildren[index].index >= at {
+            node.unreadChildren[index].index += 1
+        }
     }
 
     /// The card with its column built: nil unless it holds exactly the members, every one arrangeable, and is free.
@@ -144,12 +240,14 @@ enum StructureInference {
         return result
     }
 
-    /// Opens the container the pass made at `place`: its members take its slot where they are on screen, and a child
-    /// this build couldn't read keeps its place among the rest. False when it isn't one the pass made, or holds
-    /// something this build couldn't read.
-    private static func open(_ place: Int, in parent: inout LayerNode) -> Bool {
+    /// Opens the container the pass made at `place`, for a structure that takes `taken`: its members take its slot where
+    /// they are on screen, and a child this build couldn't read keeps its place among the rest. False when it isn't one
+    /// the pass made, holds something this build couldn't read, or holds something the structure doesn't take, which
+    /// would go loose (Task 6 m1): a thing put in it since it was offered.
+    private static func open(_ place: Int, in parent: inout LayerNode, takenBy taken: Set<UUID>) -> Bool {
         let container = parent.children[place]
-        guard container.kind == .group, container.sketch?.decidedBy == .structure, container.unreadChildren.isEmpty
+        guard container.kind == .group, container.sketch?.decidedBy == .structure, container.unreadChildren.isEmpty,
+              container.children.allSatisfy({ taken.contains($0.id) })
         else { return false }
         let members = container.children.map { TreeRules.released($0, from: container) }
         if !parent.unreadChildren.isEmpty {
@@ -207,6 +305,12 @@ enum StructureInference {
     /// Whether two boxes touch or overlap.
     private static func meets(_ a: CGRect, _ b: CGRect) -> Bool {
         a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY
+    }
+
+    /// The box round a node's turned shape, as `TreeEdit.shapesBox(of:)` gives it for one.
+    private static func shapeBox(_ node: LayerNode) -> CGRect {
+        let degrees = node.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
+        return Rotation.normalized(degrees) == 0 ? node.frame : TurnedRect(rect: node.frame, degrees: degrees).bounds
     }
 
     // MARK: - One pass
@@ -309,6 +413,8 @@ enum StructureInference {
         let mode: Mode
         let measure: TextMeasure
         let depth: Int
+        /// Where what a build earlier in the step may have moved lay when the step began: see `infer`.
+        let started: [UUID: CGPoint]
         /// The children in `grows` that are still a row, column or grid the pass made, holding only what it may take.
         let growing: [UUID: Growing]
         /// Where each of the parent's children, and each member of a container that may grow, is now on screen.
@@ -317,13 +423,14 @@ enum StructureInference {
         let places: [UUID: Int]
 
         init(parent: LayerNode, new: Set<UUID>, grows: Set<UUID>, tokens: DesignTokens, mode: Mode,
-             measure: TextMeasure, depth: Int) {
+             measure: TextMeasure, depth: Int, started: [UUID: CGPoint]) {
             self.parent = parent
             self.new = new
             self.tokens = tokens
             self.mode = mode
             self.measure = measure
             self.depth = depth
+            self.started = started
             var growing: [UUID: Growing] = [:], origins: [UUID: CGPoint] = [:], places: [UUID: Int] = [:]
             for (place, child) in parent.children.enumerated() {
                 if origins[child.id] == nil {
@@ -661,7 +768,8 @@ enum StructureInference {
         /// `indices` as one band, or, when there are more than `StructureConventions.gridSearchedTogether`, in bands
         /// across the container from the top, each of that many at most: a band ends there, or once it is half full
         /// where nothing in it reaches below the top of the next. Every grid there can be is tried within a band, and
-        /// trying every grid among hundreds of things took seconds.
+        /// trying every grid among hundreds of things took seconds. It costs grids across a band's edge, in voice's
+        /// tidy and in the pass after a batch alike: a busy screen's neighbourhood can pass that many.
         private static func bands(of indices: [Int], _ facts: Facts) -> [[Int]] {
             let most = StructureConventions.gridSearchedTogether
             guard indices.count > most else { return [indices] }
@@ -894,11 +1002,28 @@ enum StructureInference {
                              container: container, confidence: confidence, movement: movement)
         }
 
-        /// How far a member moves to `origin` in the parent's space. What a row proposed just before holds moves with it,
-        /// from where it is now.
+        /// How far a member put at `origin` in the parent's space, or anything in it, moves. What a row proposed just
+        /// before holds moves with it, from where it is now; inside a member, what a build earlier in the step moved
+        /// counts from where it lay when the step began (`started`, A1).
         private func moved(_ node: LayerNode, to origin: CGPoint) -> CGFloat {
-            if let before = origins[node.id] { return hypot(origin.x - before.x, origin.y - before.y) }
-            return node.children.map { moved($0, to: origin.offset(by: $0.frame.origin)) }.max() ?? 0
+            guard let now = origins[node.id] else {
+                return node.children.map { moved($0, to: origin.offset(by: $0.frame.origin)) }.max() ?? 0
+            }
+            var placed = node
+            placed.frame.origin = now
+            return furthest(placed, shiftedBy: CGVector(dx: origin.x - now.x, dy: origin.y - now.y), in: .identity)
+        }
+
+        /// The furthest `node` or anything in it ends up from where it lay when the step began, once it moves by `shift`.
+        /// `toParent` takes the space it lies in to the parent's.
+        private func furthest(_ node: LayerNode, shiftedBy shift: CGVector, in toParent: CGAffineTransform) -> CGFloat {
+            let own = node.transformToParent.concatenating(toParent)
+            let now = CGPoint.zero.applying(own)
+            let start = started[node.id] ?? now
+            let distance = hypot(now.x + shift.dx - start.x, now.y + shift.dy - start.y)
+            // With nothing moved earlier in the step, everything in it moves as it does.
+            guard !started.isEmpty else { return distance }
+            return node.children.reduce(distance) { max($0, furthest($1, shiftedBy: shift, in: own)) }
         }
 
         private func spacing(of structure: Structure) -> CGFloat? {

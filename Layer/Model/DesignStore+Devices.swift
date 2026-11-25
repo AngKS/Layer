@@ -147,14 +147,14 @@ extension DesignStore {
         let tree = tree
         guard device.problems.isEmpty, let old = tree.settings.customDevices.first(where: { $0.id == device.id }) else { return }
         let reflows = tree.screens.filter { tree.device(of: $0) == old }
-            .map { (screen: $0.id, frames: DeviceReflow.frames(for: $0.root, from: old, to: device)) }
-        asStep(named: String(localized: "Edit Device")) {
+            .map { (screen: $0.id, frames: DeviceReflow.frames(for: $0.root, from: old, to: device, tokens: tree.settings.tokens)) }
+        asStep(named: String(localized: "Edit Device")) { keepingPlacementIntents {
             apply { content in
                 guard let index = content.tree.settings.customDevices.firstIndex(where: { $0.id == device.id }) else { return }
                 content.tree.settings.customDevices[index] = device
             }
             for each in reflows { reflow(each.screen, to: each.frames) }
-        }
+        } }
     }
 
     /// Whether a screen is drawn as the device, or it is the canvas's New Screens device (`sketchDeviceID`) (F16).
@@ -183,7 +183,8 @@ extension DesignStore {
     }
 
     /// One step: the screen's device, and its contents by placement intent (a free root) or re-laid by the rules (any
-    /// other root). An iPhone is kept as no device, as today. Nothing happens for the same device.
+    /// other root). An iPhone is kept as no device, as today. Nothing happens for the same device. The intents moved by
+    /// stay as they are: only the person's own placing rewrites one (plan 5's final review, A4).
     ///
     /// The device picker, Siri, voice and a device added for the screen all change a device through this (spec §5).
     /// A device the design has no frame for changes nothing, and so does one of its own with problems
@@ -194,21 +195,27 @@ extension DesignStore {
         let new = tree.settings.device(named: device.id)
         guard new.id == device.id, new.problems.isEmpty, new.id != (screen.deviceID ?? DeviceFrame.iPhone.id) else { return }
         // Worked out from the device it was drawn as, before the change.
-        let frames = DeviceReflow.frames(for: screen.root, from: tree.device(of: screen), to: new)
-        asOneStep {
+        let frames = DeviceReflow.frames(for: screen.root, from: tree.device(of: screen), to: new, tokens: tree.settings.tokens)
+        asOneStep { keepingPlacementIntents {
             updateTreeScreen(screenID) { $0.deviceID = new.id == DeviceFrame.iPhone.id ? nil : new.id }
             reflow(screenID, to: frames)
-        }
+        } }
     }
 
     // MARK: How the writes work
 
-    /// Puts a screen root's children at `frames`, by id, in one change through `reconcile`. Nothing for none.
+    /// Puts a screen root's children, and what they hold, at `frames`, by id, in one change through `reconcile`: the
+    /// members of a row, column or grid the pass made that scales are among them (`DeviceReflow`). Nothing for none.
     private func reflow(_ screenID: TreeScreen.ID, to frames: [UUID: CGRect]) {
         guard !frames.isEmpty else { return }
         reconcile(screenID) { root in
             for index in root.children.indices {
                 if let frame = frames[root.children[index].id] { root.children[index].frame = frame }
+                for inner in root.children[index].children.indices {
+                    if let frame = frames[root.children[index].children[inner].id] {
+                        root.children[index].children[inner].frame = frame
+                    }
+                }
             }
         }
     }

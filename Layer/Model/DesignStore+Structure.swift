@@ -19,10 +19,11 @@ extension DesignStore {
     /// `build(_:)` for structures proposed in one parent, in order, in one change: each is built on what those before
     /// it built, so that a column holds a row built just before it, and one that can't be built is left out. One change
     /// lays the parent out once, where a change each laid it out once each: tidying a container of hundreds of things
-    /// builds dozens (Task 10). Returns the containers built: none when the parent isn't on a screen or the result
-    /// would pass depth 32 or 5,000 nodes. A structure proposed in another parent than the first's is left out.
+    /// builds dozens (Task 10). With `carryingRiders` (voice's tidy), what lies on a member goes where it goes
+    /// (`StructureInference.applying`). Returns the containers built: none when the parent isn't on a screen or the
+    /// result would pass depth 32 or 5,000 nodes. A structure proposed in another parent than the first's is left out.
     @discardableResult
-    func build(_ structures: [StructureInference.Structure]) -> [UUID] {
+    func build(_ structures: [StructureInference.Structure], carryingRiders: Bool = false) -> [UUID] {
         guard let parentID = structures.first?.parent else { return [] }
         let index = index, tree = tree
         guard let entry = index[parentID], case .screen(let screenID) = entry.host,
@@ -31,7 +32,7 @@ extension DesignStore {
         let device = tree.device(of: screen)
         var ids: [UUID] = []
         for structure in structures where structure.parent == parentID {
-            guard var built = StructureInference.applying(structure, to: parent) else { continue }
+            guard var built = StructureInference.applying(structure, to: parent, carryingRiders: carryingRiders) else { continue }
             let id = structure.container.id
             if structure.kind != .cardColumn {
                 guard index[id] == nil, let slot = built.children.firstIndex(where: { $0.id == id }) else { continue }
@@ -48,10 +49,11 @@ extension DesignStore {
         return ids.filter { self.index[$0] != nil }
     }
 
-    /// Marks the pass's refusal on each (call 11): `structureDeclined`, so that it never takes them again. One with no
-    /// intent gets one that carries the mark: its frame on the screen as its bounds, `.structure`, its placement read
-    /// from there. A container the person made has no intent and is never taken anyway, so it is left as it is. Not an
-    /// undo step, as a suggested title isn't one (`setTitle(undoable: false)`): undo never takes a decline back.
+    /// Marks the pass's refusal on each (call 11), for "Keep them as drawn": `structureDeclined`, so that it never takes
+    /// them again. One with no intent gets one that carries the mark: its frame on the screen as its bounds,
+    /// `.structure`, its placement read from there. A container the person made has no intent and is never taken anyway,
+    /// so it is left as it is. Not an undo step, as a suggested title isn't one (`setTitle(undoable: false)`): undo never
+    /// takes this decline back. A decline a change makes, a move or an ungroup, is part of that change's step instead.
     func declineStructure(_ ids: [UUID]) {
         guard markDeclinedOutsideTheHistory(ids) else { return }
         markNeedsSaving()

@@ -2361,8 +2361,12 @@ final class AppModel {
     /// What the last structure pass offered, while that is on offer: shown once no "Did you mean" is up (call 12).
     /// Set only by the pass's own methods, which live in another file and so can't be given a private setter.
     var structureOffer: StructureOffer?
-    /// Takes the offer away once it has shown for `StructureConventions.offerLifetime`.
+    /// Takes the offer away once it has shown for `StructureConventions.offerLifetime`, while it shows.
     @ObservationIgnored var structureOfferExpiry: Task<Void, Never>?
+    /// How long the offer has still to show: all of its time once offered, less what it has shown for (call 12).
+    @ObservationIgnored var structureOfferTimeLeft: Duration = StructureConventions.offerLifetime
+    /// When the offer last began to show, while its time runs.
+    @ObservationIgnored var structureOfferShownSince: ContinuousClock.Instant?
     /// Where each member of the offer was when it was offered: see `OfferedPlace`.
     @ObservationIgnored var structureOfferPlaces: [UUID: OfferedPlace] = [:]
     /// The nodes the readings have made since the batch began, for the pass once it settles (call 1).
@@ -2381,6 +2385,8 @@ final class AppModel {
         suggestionExpiry?.cancel()
         suggestedPlace = place(of: suggestion)
         self.suggestion = suggestion
+        // A structure offer showing waits for it, its time stopped (call 12).
+        pauseStructureOfferClock()
         suggestionExpiry = Task { [weak self] in
             try? await Task.sleep(for: Self.suggestionLifetime)
             guard !Task.isCancelled else { return }

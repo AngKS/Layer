@@ -194,6 +194,51 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         #expect(rootChildren(model, screen).first?.children.map(\.id) == [a.id, b.id])
     }
 
+    // MARK: - Nothing moved more than 8 pt, nothing hidden (plan 5's final review)
+
+    /// A new card's column and the row it then makes with a card beside it are one step: the texts the card holds move
+    /// (−5, −5) in its column, and the row would move the card (−1, −2) more, 9.2 pt in all. The 8 pt limit is on the
+    /// furthest any leaf moves in the step (A1), so the row is offered, not built. The card's column stays built.
+    @Test func aCardsColumnAndTheRowItWouldJoinMoveNothingMoreThan8Points() throws {
+        let (model, screen, _) = makeModel()
+        let beside = sketchedCard(CGRect(x: 20, y: 300, width: 170, height: 140), holding: [])
+        let texts = [text(21, 21, 120, 24), text(21, 61, 120, 24), text(21, 101, 120, 24)]
+        let card = sketchedCard(CGRect(x: 203, y: 304, width: 170, height: 140), holding: texts)
+        add([beside, card], to: screen, in: model)
+        let drawn = try texts.map { try #require(model.store.placed($0.id)?.frame) }
+
+        model.structurePass(over: [card.id])
+
+        #expect(rootChildren(model, screen).map(\.id) == [beside.id, card.id], "no row is built")
+        #expect(model.store.node(card.id)?.layout == .stack(LayerNode.Stack(axis: .vertical, spacing: 16, alignment: .start)),
+                "the card's column is built")
+        let offer = try #require(model.structureOffer)
+        #expect(offer.structure.kind == .row)
+        #expect(offer.structure.members == [beside.id, card.id])
+        #expect(offer.structure.movement > StructureConventions.furthestAutomaticMove, "measured from where the texts were drawn")
+        for (text, was) in zip(texts, drawn) {
+            let now = try #require(model.store.placed(text.id)?.frame)
+            #expect(hypot(now.minX - was.minX, now.minY - was.minY) <= StructureConventions.furthestAutomaticMove)
+        }
+    }
+
+    /// A badge drawn on an image's corner, after it, stays in front of the row the image goes into with an image drawn
+    /// beside it (A2): the row takes the frontmost member's slot only where that hides nothing seen.
+    @Test func aBadgeOnAnEarlierMemberStaysInSight() throws {
+        let (model, screen, _) = makeModel()
+        let first = image(30, 300), badge = leaf(.symbol, 150, 306, 32, 20), second = image(203, 300)
+        add([first, badge, second], to: screen, in: model)
+
+        model.structurePass(over: [second.id])
+
+        let root = rootChildren(model, screen)
+        #expect(root.count == 2)
+        let row = try #require(root.first)
+        #expect(row.children.map(\.id) == [first.id, second.id])
+        #expect(root.last?.id == badge.id, "in front of the row, so the image doesn't cover it")
+        #expect(model.store.node(badge.id)?.frame == badge.frame, "where it was drawn")
+    }
+
     // MARK: - Declines
 
     @Test func decliningMarksThemAndTheyAreNeverOfferedAgain() throws {
@@ -262,10 +307,40 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         #expect(model.store.parent(of: c.id) == .screen(screen))
         #expect(isDeclined(c.id, in: model))
 
-        // The mark is no step: undoing the lift puts it back in the row, still declined.
+        // The mark is part of the lift's step (plan 5's final review, A9): undoing it puts it back in the row, undeclined.
         undo.undo()
         #expect(model.store.parent(of: c.id) == .node(row.id))
-        #expect(isDeclined(c.id, in: model))
+        #expect(!isDeclined(c.id, in: model))
+    }
+
+    /// A decline a change makes is part of that change's step (plan 5's final review, A9): undoing the move that took a
+    /// member out of a column the pass built takes the mark away with it, and redo puts it back. Ungrouping the column
+    /// is the same.
+    @Test func undoingWhatDeclinedTakesTheMarksAway() throws {
+        let (model, screen, undo) = makeModel()
+        let fields = [text(20, 100, 353, 48), text(20, 172, 353, 48), text(20, 244, 353, 48)]
+        add(fields, to: screen, in: model)
+        model.structurePass(over: fields.map(\.id))
+        let column = try #require(rootChildren(model, screen).first)
+        #expect(column.children.map(\.id) == fields.map(\.id))
+
+        #expect(model.store.move(fields[2].id, to: .screen(screen)))
+        #expect(isDeclined(fields[2].id, in: model))
+        undo.undo()
+        #expect(model.store.parent(of: fields[2].id) == .node(column.id))
+        #expect(!fields.contains { isDeclined($0.id, in: model) }, "no member is declined")
+        undo.redo()
+        #expect(model.store.parent(of: fields[2].id) == .screen(screen))
+        #expect(isDeclined(fields[2].id, in: model))
+        undo.undo()
+
+        #expect(model.store.ungroup(DesignStore.ElementRef(host: .screen(screen), element: column.id)) != nil)
+        #expect(fields.allSatisfy { isDeclined($0.id, in: model) })
+        undo.undo()
+        #expect(model.store.node(column.id)?.children.map(\.id) == fields.map(\.id))
+        #expect(!fields.contains { isDeclined($0.id, in: model) }, "no member is declined")
+        undo.redo()
+        #expect(fields.allSatisfy { isDeclined($0.id, in: model) })
     }
 
     @Test func undoingABuiltRowDeclinesNothing() throws {
@@ -341,6 +416,61 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         #expect(model.shownStructureOffer == nil)
         model.dismissSuggestion()
         #expect(model.shownStructureOffer == offer)
+    }
+
+    /// An offer already showing that a later "Did you mean" hides waits for it (call 12, Task 9 m2): its time stops while
+    /// it is hidden, and goes on once it shows again.
+    @Test func anOfferHiddenByADidYouMeanWaitsForIt() throws {
+        let (model, screen, _) = makeModel()
+        let fieldSketch = CGRect(x: 30, y: 600, width: 330, height: 44)
+        let field = try #require(model.store.addSketched(.textField, from: fieldSketch, confidence: 0.6, decidedBy: .rules))
+        _ = raggedRow(in: model, on: screen)
+        let offer = try #require(model.shownStructureOffer)
+        #expect(model.structureOfferExpiry != nil, "its time runs while it shows")
+
+        model.offer(KindSuggestion(ref: DesignStore.ElementRef(host: .screen(screen), element: field), kind: .button,
+                                   sketch: fieldSketch, observation: try observation(of: fieldSketch)))
+
+        #expect(model.shownStructureOffer == nil)
+        #expect(model.structureOffer == offer)
+        #expect(model.structureOfferExpiry == nil, "hidden, its time stops")
+        let left = model.structureOfferTimeLeft
+        #expect(left < StructureConventions.offerLifetime && left > .seconds(7), "what it has left is kept")
+        model.dismissSuggestion()
+        #expect(model.shownStructureOffer == offer)
+        #expect(model.structureOfferExpiry != nil, "shown again, it goes on")
+    }
+
+    /// A grid offered in place of a row the pass built is refused once the row is no longer as it was built (Task 6 m1):
+    /// a thing put into the row, or a new name for it. Built, the grid would have let what the row gained go loose.
+    @Test(arguments: ["grown", "renamed"])
+    func aStaleGrowthOfferIsRefused(change: String) throws {
+        let (model, screen, _) = makeModel()
+        let a = image(30, 300), b = image(203, 300)
+        add([a, b], to: screen, in: model)
+        model.structurePass(over: [a.id, b.id])
+        let row = try #require(rootChildren(model, screen).first)
+        #expect(row.children.map(\.id) == [a.id, b.id])
+        // Rows 16 and 18 apart, and one 2 pt lower: sure enough to offer, not to build.
+        let c = image(30, 436), d = image(202, 438)
+        add([c, d], to: screen, in: model)
+        model.structurePass(over: [c.id, d.id])
+        let offer = try #require(model.structureOffer)
+        #expect(offer.structure.title == "Make a grid?")
+        #expect(offer.structure.replacing == [row.id])
+
+        let e = image(374, 300)
+        switch change {
+        case "grown": #expect(model.store.add(e, to: .node(row.id)))
+        default: model.store.update(row.id) { $0.name = "Gallery" }
+        }
+        #expect(model.structureOffer == offer, "none of what it offers has moved")
+        let before = model.store.tree
+
+        model.acceptStructureOffer()
+
+        #expect(model.structureOffer == nil)
+        #expect(model.store.tree == before, "nothing is built, and nothing goes loose")
     }
 
     /// The pass lining up the thing a "Did you mean" is about is the app's own doing, not the person's: the suggestion

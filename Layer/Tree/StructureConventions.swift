@@ -34,7 +34,10 @@ enum StructureConventions {
     /// The builder's: a sibling this close to the neighbourhood joins it.
     static let reach: CGFloat = 48
     /// The builder's: the grid search tries every grid among this many things at once at most, and among more, in
-    /// bands of this many across the container (plan 5, Task 10: tidying hundreds of things took seconds).
+    /// bands of this many across the container (plan 5, Task 10: tidying hundreds of things took seconds). The cost:
+    /// fewer grids are read on very large screens, by voice's tidy, and by the pass after a batch too, whose
+    /// neighbourhood on a busy screen can pass 64 (plan 5's final review): a grid drawn cell by cell there can be cut
+    /// at the line between two of its rows, and read as rows.
     static let gridSearchedTogether = 64
     // Placement zones.
     /// Of the screen's width: how far from the middle still reads as centred.

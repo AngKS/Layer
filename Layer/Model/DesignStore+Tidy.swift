@@ -12,11 +12,13 @@ extension DesignStore {
     ///
     /// Inside out, as the pass after a batch goes: a card's column is built before the root it lies on is looked at.
     /// What the tidy builds keeps where it lies: a column starts where its first member is, so a screen tidied keeps its
-    /// top where it was rather than moving it to a margin of its own.
+    /// top where it was rather than moving it to a margin of its own. What rides on a member, a caption on its picture,
+    /// goes where the member goes (plan 5's final review, A5), and keeps its placement intent: only the person's own
+    /// placing rewrites one (A4).
     @discardableResult func tidy(_ screenID: TreeScreen.ID) -> [UUID] {
         let tokens = tree.settings.tokens
         var built: [UUID] = []
-        asOwnStep {
+        asOwnStep { keepingPlacementIntents {
             for id in tidiedContainers(on: screenID) {
                 guard let parent = node(id), let depth = index[id]?.depth else { continue }
                 // Every container the pass made may grow (call 10); `infer` takes those still a row, column or grid.
@@ -26,9 +28,9 @@ extension DesignStore {
                 let sure = decisions.compactMap { decision in
                     if case .apply(let structure) = decision { structure } else { nil }
                 }
-                built += build(sure)
+                built += build(sure, carryingRiders: true)
             }
-        }
+        } }
         return built
     }
 

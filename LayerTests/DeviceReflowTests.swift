@@ -201,6 +201,106 @@ struct DeviceReflowTests {
         }
     }
 
+    // MARK: - What the pass built, what the person moved, and backgrounds (plan 5's final review)
+
+    /// Three fields across an iPhone, which the pass makes a column, still scale with the screen as they would loose
+    /// (A3): every member is proportional, so the column fills the iPad's width as they would.
+    @Test func fieldsInAPassBuiltColumnFillTheIPad() throws {
+        let fields = [200, 272, 344].map { node(CGRect(x: 20, y: $0, width: 353, height: 48), .textField) }
+        let screen = freeScreen(fields)
+        let (model, _) = makeModel([screen])
+        model.structurePass(over: fields.map(\.id))
+        let column = try #require(model.store.treeScreen(screen.id)?.root.children.first)
+        #expect(column.children.map(\.id) == fields.map(\.id))
+
+        model.store.changeDevice(of: screen.id, to: iPad)
+
+        for field in fields {
+            #expect(model.store.placed(field.id)?.frame == CGRect(x: 42, y: field.frame.minY, width: 737, height: 48))
+        }
+    }
+
+    /// The same column built on an iPad, 737 wide, goes to an iPhone and stays on the screen (A3).
+    @Test func aColumnBuiltOnAnIPadStaysOnAnIPhone() throws {
+        let fields = [200, 272, 344].map { node(CGRect(x: 42, y: $0, width: 737, height: 48), .textField) }
+        let screen = freeScreen(fields, on: iPad.id)
+        let (model, _) = makeModel([screen])
+        model.structurePass(over: fields.map(\.id))
+        let column = try #require(model.store.treeScreen(screen.id)?.root.children.first)
+        #expect(column.children.map(\.id) == fields.map(\.id))
+
+        model.store.changeDevice(of: screen.id, to: .iPhone)
+
+        for field in fields {
+            #expect(model.store.placed(field.id)?.frame == CGRect(x: 20, y: field.frame.minY, width: 353, height: 48))
+        }
+        let root = try #require(model.store.treeScreen(screen.id)?.root)
+        #expect(!TreeValidator.check(root, on: .iPhone).contains { $0.kind == .clipped })
+    }
+
+    /// A button sketched at the left and dragged against the right margin goes to the iPad's right edge (A4): its intent
+    /// is read again from where the person put it. Undoing the drag puts the intent back with the frame.
+    @Test func aSketchedButtonDraggedRightStaysAtTheRightEdge() throws {
+        var button = node(CGRect(x: 20, y: 700, width: 170, height: 50))
+        button.sketch = LayerNode.SketchIntent(sketched: button.frame, on: DeviceFrame.iPhone.size,
+                                               margin: DeviceFrame.iPhone.margin, confidence: 1, decidedBy: .rules)
+        #expect(button.sketch?.placement == .leading)
+        let screen = freeScreen([button])
+        let (model, undo) = makeModel([screen])
+
+        model.store.place(button.id, at: CGRect(x: 203, y: 700, width: 170, height: 50))
+        model.store.changeDevice(of: screen.id, to: iPad)
+
+        #expect(model.store.node(button.id)?.frame == CGRect(x: 630, y: 700, width: 170, height: 50))
+        undo.undo()
+        undo.undo()
+        #expect(model.store.node(button.id) == button)
+    }
+
+    /// Only the person's own placing rewrites an intent: a device change keeps every intent it moves things by, even one
+    /// the new frame would read otherwise (A4). Saved as centred, a small button at the left goes to x 234 on the iPad,
+    /// which reads as fixed there, and comes back to where it was.
+    @Test func aDeviceChangeRewritesNoIntent() throws {
+        var saved = node(CGRect(x: 20, y: 400, width: 51, height: 31))
+        saved.sketch = LayerNode.SketchIntent(originalBounds: saved.frame, normalizedBounds: .zero, confidence: 1,
+                                              decidedBy: .rules, placement: .centered)
+        let screen = freeScreen([saved])
+        let (model, _) = makeModel([screen])
+
+        model.store.changeDevice(of: screen.id, to: iPad)
+        #expect(model.store.node(saved.id)?.frame == CGRect(x: 234, y: 400, width: 51, height: 31))
+        #expect(model.store.node(saved.id)?.sketch == saved.sketch)
+        model.store.changeDevice(of: screen.id, to: .iPhone)
+        #expect(model.store.node(saved.id) == saved)
+    }
+
+    /// A background that fills the screen fills the new one; a locked one stays (A5, ported from ScreenTidy's
+    /// `aBackgroundFillsTheNewDevice`, retired under (o)).
+    @Test func aBackgroundFillsTheNewDevice() throws {
+        let background = node(CGRect(x: 0, y: 0, width: 393, height: 852), .shape)
+        let title = node(CGRect(x: 50, y: 100, width: 228, height: 40), .title)
+        #expect(reflowed([background, title])[background.id] == CGRect(origin: .zero, size: iPad.size))
+        #expect(reflowed([node(CGRect(origin: .zero, size: iPad.size), .image)], from: iPad, to: .iPhone).values.first
+                == CGRect(origin: .zero, size: DeviceFrame.iPhone.size))
+        var locked = background
+        locked.isLocked = true
+        #expect(reflowed([locked, title])[locked.id] == nil)
+    }
+
+    /// A deliberate bleed keeps its overhang (A5 with Task 4's M3): a header past the iPhone's top, left and right edges
+    /// by 10 spans the iPad's width the same way, and a picture hanging 10 off the right edge, trailing, still does.
+    @Test func aBleedKeepsItsOverhang() {
+        let header = node(CGRect(x: -10, y: -10, width: 413, height: 200), .image)
+        let hanging = node(CGRect(x: 233, y: 300, width: 170, height: 120), .image)
+        let onIPad = reflowed([header, hanging])
+        #expect(onIPad[header.id] == CGRect(x: -10, y: -10, width: 840, height: 200))
+        #expect(onIPad[hanging.id] == CGRect(x: 660, y: 300, width: 170, height: 120))
+
+        var back = header
+        back.frame = onIPad[header.id] ?? header.frame
+        #expect(reflowed([back], from: iPad, to: .iPhone)[header.id] == header.frame)
+    }
+
     // MARK: - A column screen
 
     @Test func aColumnScreenIsLaidOutAgain() throws {

@@ -36,6 +36,8 @@ final class DesignStore {
 
     /// True while `change(_:)` makes a change, before it is recorded.
     @ObservationIgnored private var isChanging = false
+    /// True while the app moves things by their placement intents: see `keepingPlacementIntents(_:)`.
+    @ObservationIgnored private var keepsPlacementIntents = false
 
     /// Counts the changes made to the content, by anyone, so that a step can tell whether
     /// the change before its own was its own too.
@@ -967,7 +969,9 @@ final class DesignStore {
         isChanging = true
         // The change and the tree's rules after it, in one access to the content, so that the
         // whole design is compared once (C6).
-        Self.applying(body, to: &content, previous: before, laidOutAhead: ahead)
+        let isUndoingOrRedoing = undoManager.map { $0.isUndoing || $0.isRedoing } ?? false
+        Self.applying(body, to: &content, previous: before, laidOutAhead: ahead, followingPlacements: !keepsPlacementIntents,
+                      decliningWhatLeftAStructure: !isUndoingOrRedoing)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -983,29 +987,15 @@ final class DesignStore {
             register(step)
         }
         step.record(from: before, to: content, change: changeCount)
-        declineWhatLeftAStructure(since: before)
         // Told only now that it is recorded. Whatever the notice sets off, such as the ink
         // canvas following an eraser, is a change of its own, recorded in its own step: told
         // before, it went into this step as well (review I-1).
         onChange?(content)
     }
 
-    /// Plan 5's call 11 (F4): a node a change took out of a container the structure pass made, into another parent, is
-    /// declined, whichever verb moved it: the canvas's drops and lifts, the Layers panel, several things dragged, Siri
-    /// and voice. Not after an undo or a redo, which never come through here anyway, and not for a container that is gone,
-    /// so that a structure grown into another, undone or ungrouped declines nothing this way (`ungroup` declines on its
-    /// own). The marks are written after the change's step is recorded, outside it, and told with the change.
-    private func declineWhatLeftAStructure(since before: DesignContent) {
-        if let undoManager, undoManager.isUndoing || undoManager.isRedoing { return }
-        let leaving = Self.takenOutOfStructures(from: before.tree, to: content.tree)
-        guard !leaving.isEmpty else { return }
-        isChanging = true
-        defer { isChanging = false }
-        markDeclinedOutsideTheHistory(leaving)
-    }
-
     /// Writes the structure pass's declines (`declining(_:in:)`) outside every step, as a suggested title is written
     /// (`setTitle(undoable: false)`): undo never takes one back, and no Undo lights for one. False when none changed.
+    /// Only "Keep them as drawn" declines so (call 11): a decline a change makes is part of its step (`applying`).
     @discardableResult
     func markDeclinedOutsideTheHistory(_ ids: [UUID]) -> Bool {
         let marked = Self.declining(Set(ids), in: content.tree)
@@ -1020,11 +1010,38 @@ final class DesignStore {
     ///
     /// A screen whose root was laid out ahead, and is that root now, is laid out already: the rules are told it was
     /// that root before, so they find nothing changed there and lay nothing out (plan 3, call 6).
+    ///
+    /// With `followingPlacements`, each sketched thing the change put somewhere new in a free container on a screen has
+    /// its placement intent read again from where it is (`TreeContent.followPlacements(since:)`), in the same change and
+    /// so the same step: undoing the move puts the intent back with it.
+    ///
+    /// With `decliningWhatLeftAStructure` (plan 5's call 11, F4), a node the change took out of a container the
+    /// structure pass made, into another parent, is declined, whichever verb moved it: the canvas's drops and lifts, the
+    /// Layers panel, several things dragged, Siri and voice. Not for a container that is gone, so that a structure grown
+    /// into another or ungrouped declines nothing this way (`ungroup` declines on its own). The marks are part of the
+    /// change, and so of its step (plan 5's final review, A9): undoing the move takes them away, and redo puts them
+    /// back. Not after an undo or a redo, which never come through here anyway.
     private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent, previous: DesignContent,
-                                 laidOutAhead: [TreeScreen.ID: LayerNode] = [:]) {
+                                 laidOutAhead: [TreeScreen.ID: LayerNode] = [:], followingPlacements: Bool,
+                                 decliningWhatLeftAStructure: Bool) {
         body(&content)
         content.pendingPointers = [:]
         TreeRules.apply(to: &content.tree, after: holding(laidOutAhead, in: previous.tree, as: content.tree))
+        if followingPlacements { content.tree.followPlacements(since: previous.tree) }
+        if decliningWhatLeftAStructure {
+            let leaving = takenOutOfStructures(from: previous.tree, to: content.tree)
+            if !leaving.isEmpty { content.tree = declining(Set(leaving), in: content.tree) }
+        }
+    }
+
+    /// Makes `body`'s changes keeping every placement intent as it is (plan 5's final review, A4): a device change moves
+    /// things by them, and voice's tidy carries what rides on what it lays out. Only a move or a resize the person makes
+    /// rewrites one.
+    func keepingPlacementIntents<T>(_ body: () throws -> T) rethrows -> T {
+        let outer = keepsPlacementIntents
+        keepsPlacementIntents = true
+        defer { keepsPlacementIntents = outer }
+        return try body()
     }
 
     /// `previous` with each screen of `laidOut` holding its root there, when `content` has that screen with that root:
