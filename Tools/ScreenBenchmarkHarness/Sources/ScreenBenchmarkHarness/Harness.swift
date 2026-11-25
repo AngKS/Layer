@@ -70,8 +70,8 @@ import Foundation
     // MARK: Scoring again
 
     /// Scores again, with today's readers, every A2UI answer a `hosted` run printed to `log`: the text between a
-    /// "=== … a2ui · <brief>" line and its "--- valid=" line. No model runs. Each answer's new score is printed, then
-    /// how many are valid now and how many were then.
+    /// "=== … a2ui · <brief>" line and its "--- valid=" line. An answer that ended in ERR has no such line and isn't
+    /// scored. No model runs. Each answer's new score is printed, then how many are valid now and how many were then.
     private static func rescore(log path: String) {
         guard let log = try? String(contentsOfFile: path, encoding: .utf8) else {
             print("ERR can't read \(path)")
@@ -81,9 +81,11 @@ import Foundation
         var validThen = 0
         var answer: [String]?
         for line in log.components(separatedBy: "\n") {
-            if line.hasPrefix("=== "), line.contains(" a2ui · ") {
-                answer = []
-                print(line)
+            if line.hasPrefix("=== ") {
+                // Every header ends the answer before it: one that printed ERR has no "--- valid=" line, and an outline
+                // answer after it mustn't be read as part of it.
+                answer = line.contains(" a2ui · ") ? [] : nil
+                if answer != nil { print(line) }
             } else if line.hasPrefix("--- valid="), let text = answer {
                 if line.hasPrefix("--- valid=1") { validThen += 1 }
                 let score = Score.a2ui(text.joined(separator: "\n"))
