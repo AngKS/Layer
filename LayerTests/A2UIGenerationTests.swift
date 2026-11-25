@@ -303,6 +303,9 @@ struct A2UIGenerationTests {
         #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"t","component":"Text","text" "Hi"}]}}"#,
         #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"t","component":"Text","text":"Hi"}]}]}}"#,
         "{\"version\":\"1.0\",\"updateComponents\":{\"surfaceId\":\"screen\",\"components\":[{\"id\":\"t\",\"component\":\"Text\",\u{1}\"text\":\"Hi\"}]}}",
+        // A backslash straight before a raw control character is a broken escape, not a raw character in a string:
+        // escaping the tab would make it a backslash and a "t", which changes the text.
+        "{\"version\":\"1.0\",\"updateComponents\":{\"surfaceId\":\"screen\",\"components\":[{\"id\":\"t\",\"component\":\"Text\",\"text\":\"Hi\\\t\"}]}}",
     ])
     func anyOtherSlipInALineIsSkippedAndSaidOnce(_ broken: String) throws {
         let lines = [Self.createSurface, Self.update(###"{"id":"root","component":"Column","children":["title","t"]},{"id":"title","component":"Text","text":"## Hi"}"###), broken]

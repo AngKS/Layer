@@ -187,7 +187,9 @@ struct A2UIStream: Sendable {
     }
 
     /// The line with each raw control character inside a string written as JSON writes it (`\t`, `\u0001`); nil when
-    /// there is none. One outside a string is left as it is, so the line still isn't JSON.
+    /// there is none. One outside a string is left as it is, so the line still isn't JSON. Nil too when one comes
+    /// straight after a backslash: that is a broken escape, and escaping the character would change the text (a
+    /// backslash and a TAB would read as a backslash and a "t").
     private static func escapingControlCharacters(in line: String) -> String? {
         var escaped = ""
         var changed = false
@@ -195,8 +197,8 @@ struct A2UIStream: Sendable {
         var afterBackslash = false
         for scalar in line.unicodeScalars {
             if inString, scalar.value < 0x20 {
+                if afterBackslash { return nil }
                 changed = true
-                afterBackslash = false
                 switch scalar {
                 case "\t": escaped += "\\t"
                 case "\r": escaped += "\\r"
