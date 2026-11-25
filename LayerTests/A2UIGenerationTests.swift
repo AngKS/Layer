@@ -412,6 +412,13 @@ struct A2UIGenerationTests {
         #expect(!prompt.contains("Use 5 to 14 components"))
     }
 
+    /// Every A2UI failure in the third fixed run was the line of the last thing a Column or Row holds, closed with `]}`
+    /// too many, as if it closed that Column or Row too (2026-11-26). The prompt says a line doesn't.
+    @Test func theA2UIPromptSaysALineClosesOnlyItsOwnComponent() {
+        let prompt = A2UIPrompt.instructions(for: "a profile")
+        #expect(prompt.contains("A line closes its own component and the message, nothing more: it never adds ]} to close the Column or Row it is in, even for the last thing that Column or Row holds."))
+    }
+
     /// A model left a LayerToggle's label out beside a Text saying the same (2026-11-26), and a label is required.
     @Test func theA2UIPromptSaysAControlAlwaysHasItsLabel() {
         let prompt = A2UIPrompt.instructions(for: "a profile")

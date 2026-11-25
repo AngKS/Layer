@@ -41,7 +41,8 @@ enum A2UIPrompt {
         \(message(#"{"id":"…","component":"…",…}"#))
         The first holds the root: a Column with the id root, whose children are the ids of the screen's sections, in \
         order. Then each section the root names, each followed by what it holds, a line for each component. Every id \
-        a component names has a line of its own.
+        a component names has a line of its own. A line closes its own component and the message, nothing more: it \
+        never adds ]} to close the Column or Row it is in, even for the last thing that Column or Row holds.
 
         Every component has an id and a component. An id says what its component is, in words joined by underscores, \
         such as total_label or pace_value, and no two components share one. Use only these:

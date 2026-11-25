@@ -13,8 +13,8 @@ import Testing
     }
 
     /// The A2UI prompt a model is told when it writes A2UI, as measured on 2026-11-26: a component a message, one way to
-    /// write an icon, a control's label always, ids in words, and only what shows counted. A change to them changes this
-    /// literal.
+    /// write an icon, a control's label always, ids in words, only what shows counted, and a line closing only its own
+    /// component. A change to them changes this literal.
     @Test func theA2UIPromptIsUnchanged() {
         #expect(A2UIPrompt.instructions(for: Self.brief) == Self.a2ui)
     }
@@ -368,7 +368,7 @@ import Testing
 
         Each line after it is an updateComponents message holding one component, the next part of the screen, from top to bottom:
         {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"…","component":"…",…}]}}
-        The first holds the root: a Column with the id root, whose children are the ids of the screen's sections, in order. Then each section the root names, each followed by what it holds, a line for each component. Every id a component names has a line of its own.
+        The first holds the root: a Column with the id root, whose children are the ids of the screen's sections, in order. Then each section the root names, each followed by what it holds, a line for each component. Every id a component names has a line of its own. A line closes its own component and the message, nothing more: it never adds ]} to close the Column or Row it is in, even for the last thing that Column or Row holds.
 
         Every component has an id and a component. An id says what its component is, in words joined by underscores, such as total_label or pace_value, and no two components share one. Use only these:
         - Column: children, a list of ids, from top to bottom.
