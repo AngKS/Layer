@@ -517,7 +517,7 @@ struct GroupElementsTool: Tool {
 struct SetLayoutTool: Tool {
     let actor: any VoiceActing
     let name = "setLayout"
-    let description = "Changes how a row, column, grid, card, group or screen lays out what it holds."
+    let description = "Changes how a row, column, grid, card, group or screen lays out what it holds. For “space it out more” or “tighter”, call it once, with a spacing one step from the one it had when the person spoke, such as \"24\" for 12."
 
     @Generable
     struct Arguments {
@@ -525,7 +525,7 @@ struct SetLayoutTool: Tool {
         var target: String
         @Guide(description: "free, row, column, grid of 2 (any number), or overlay; may add left, centred, right, top, bottom or stretched. Leave out to keep it.")
         var layout: String?
-        @Guide(description: "The gap between the things in it, in points, such as 16. Leave out to keep it.")
+        @Guide(description: "The gap between the things in it, in points, as text, such as \"16\". Leave out to keep it.")
         var spacing: String?
     }
 
