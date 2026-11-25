@@ -2431,6 +2431,12 @@ final class AppModel {
         }
     }
 
+    /// Returns once the format panel's pause has ended its run of changes, or at once when no run waits for it. A test
+    /// waits on the pause itself here, rather than on a clock.
+    func waitForAdjustmentPause() async {
+        await adjustmentEnd?.value
+    }
+
     /// Opens the panel's own edit, unless it is open already.
     private func beginAdjustment() {
         guard adjustment?.isOpen != true else { return }

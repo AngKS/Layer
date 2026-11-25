@@ -609,17 +609,20 @@ struct OpeningDesignTests {
         #expect(steps.all == ["prepared", "dismissing", "dismissed"], "a design was picked after the open gave up: \(steps.all)")
     }
 
-    @Test func aDesignStillComingUpIsPutAwayOnceItIsUp() async throws {
+    /// It waits on the presentation and the dismiss themselves, never on a clock: the app's limit for each, 4 s here,
+    /// ran out across a stall of the main thread that every suite shares before UIKit could finish the presentation,
+    /// and the open gave up (the sweep, lane 2). The limit isn't what this is about: `pick` is given none, and the
+    /// test's time limit stands in.
+    @Test(.timeLimit(.minutes(1)))
+    func aDesignStillComingUpIsPutAwayOnceItIsUp() async throws {
         let (window, browser, design) = try browserShowingADesign(animated: true)
         defer { window.isHidden = true }
         #expect(design.isBeingPresented)
         let url = URL(fileURLWithPath: "/designs/B.layer")
         let picking = Task {
-            // Within the ten seconds waited for below: the app's 2 s for a real
-            // presentation and dismiss, on a shared main thread, isn't what this is about.
-            try await DocumentBrowser.pick(url, in: browser, limit: .seconds(4)) { _ in } picking: { _ in }
+            try await DocumentBrowser.pick(url, in: browser, limit: nil) { _ in } picking: { _ in }
         }
-        guard case .success? = await outcome(of: picking, within: .seconds(10)) else {
+        guard case .success = await picking.result else {
             Issue.record("a dismiss tried while the design was still coming up was never finished")
             return
         }

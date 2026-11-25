@@ -280,8 +280,9 @@ enum DocumentBrowser {
     /// it is still shown, then dismissed, unless it went or began to go meanwhile. A design
     /// still coming up is waited for first, since UIKit can leave a dismiss asked for then
     /// unanswered. Each wait lasts at most `limit`; past it, the design couldn't be opened.
+    /// Nil waits for as long as each takes: a test's own time limit stands in.
     static func pick(
-        _ url: URL, in browser: UIViewController, limit: Duration = .seconds(2),
+        _ url: URL, in browser: UIViewController, limit: Duration? = .seconds(2),
         dismissing dismiss: (UIViewController, @escaping @Sendable () -> Void) -> Void = { controller, done in controller.dismiss(animated: false) { done() } },
         preparing prepare: (UIViewController) async -> Void, picking: (URL) -> Void
     ) async throws {
@@ -289,8 +290,8 @@ enum DocumentBrowser {
             await prepare(presented)
             // An open given up on meanwhile goes no further: the next may already be under way.
             try Task.checkCancellation()
-            let deadline = ContinuousClock.now + limit
-            while presented.isBeingPresented, ContinuousClock.now < deadline {
+            let deadline = limit.map { ContinuousClock.now + $0 }
+            while presented.isBeingPresented, deadline.map({ ContinuousClock.now < $0 }) ?? true {
                 try await Task.sleep(for: .milliseconds(20))
             }
             if browser.presentedViewController === presented, !presented.isBeingDismissed {
@@ -304,13 +305,14 @@ enum DocumentBrowser {
         picking(url)
     }
 
-    /// Whether `start` says it has finished within `limit`.
-    private static func finishes(within limit: Duration, _ start: (@escaping @Sendable () -> Void) -> Void) async -> Bool {
+    /// Whether `start` says it has finished within `limit`; with no limit, once it says so.
+    private static func finishes(within limit: Duration?, _ start: (@escaping @Sendable () -> Void) -> Void) async -> Bool {
         await withCheckedContinuation { continuation in
             let first = FirstToFinish()
             start {
                 if first.claim() { continuation.resume(returning: true) }
             }
+            guard let limit else { return }
             Task {
                 try? await Task.sleep(for: limit)
                 if first.claim() { continuation.resume(returning: false) }

@@ -62,6 +62,8 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     private var holdingStart = false
     private var holdingSettle = false
     private var started = false
+    /// Waits for it to start listening (`untilStarted()`).
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// While set, getting ready waits, as it does while what speech needs is fetched.
     var holdsPrepare: Bool {
@@ -84,6 +86,17 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     /// Whether it was ever asked to listen.
     var wasStarted: Bool { state.withLock { started } }
 
+    /// Returns once it has been asked to listen, and can be told what it hears: at once if it has been.
+    func untilStarted() async {
+        await withCheckedContinuation { waiter in
+            let isStarted = state.withLock {
+                if !started { startWaiters.append(waiter) }
+                return started
+            }
+            if isStarted { waiter.resume() }
+        }
+    }
+
     func prepare() async throws {
         while holdsPrepare { try? await Task.sleep(for: .milliseconds(5)) }
         if let prepareError { throw prepareError }
@@ -103,11 +116,14 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
         while holdsStart { try? await Task.sleep(for: .milliseconds(5)) }
         if let startError { throw startError }
         let (phrases, continuation) = AsyncThrowingStream<HeardPhrase, any Error>.makeStream()
-        state.withLock {
+        let waiters = state.withLock {
             self.continuation = continuation
             told = vocabulary
             started = true
+            defer { startWaiters = [] }
+            return startWaiters
         }
+        for waiter in waiters { waiter.resume() }
         Task {
             for await _ in sound { self.state.withLock { self.chunks += 1 } }
         }
@@ -408,12 +424,12 @@ struct DictationRouteTests {
     }
 
     /// A route in a hurry: a fifth of a second of quiet ends a command, or three tenths
-    /// without new words where there is no sound to go by.
-    private func bench() -> Bench {
+    /// without new words where there is no sound to go by. `patience` is how long the recogniser is given to settle.
+    private func bench(patience: Duration = .milliseconds(400)) -> Bench {
         let audio = FakeAudioSource()
         let recogniser = FakeRecogniser()
         let assembler = UtteranceAssembler(
-            pause: .milliseconds(200), staleness: .milliseconds(300), patience: .milliseconds(400), settling: .milliseconds(50)
+            pause: .milliseconds(200), staleness: .milliseconds(300), patience: patience, settling: .milliseconds(50)
         )
         return Bench(route: DictationRoute(source: audio, recogniser: recogniser, assembler: assembler), audio: audio, recogniser: recogniser)
     }
@@ -437,17 +453,35 @@ struct DictationRouteTests {
         return seen
     }
 
+    /// Gathers what the route reports until `stop` says it has seen enough, with no limit of its own: for what the test
+    /// knows comes, however long the main actor that every suite shares takes to get to it. The test's time limit
+    /// (`.timeLimit`) is what an event that never comes runs into.
+    private func everyEvent(from stream: AsyncStream<VoiceRouteEvent>, until stop: ([VoiceRouteEvent]) -> Bool) async -> [VoiceRouteEvent] {
+        var seen: [VoiceRouteEvent] = []
+        for await event in stream {
+            seen.append(event)
+            if stop(seen) { break }
+        }
+        return seen
+    }
+
     private nonisolated func commands(in events: [VoiceRouteEvent]) -> [String] {
         events.compactMap { if case .command(let text) = $0 { text } else { nil } }
     }
 
-    @Test func wordsBecomeACommandAfterAPause() async throws {
-        let bench = bench()
+    /// It waits on the recogniser starting and on the command, never on a clock: against 3 s for the start, a stall of
+    /// the main actor that every suite shares ran the limit out, and the words were said before anything listened. The
+    /// recogniser's patience is out of reach, so the command comes by its settling, as this is about, not by a stall
+    /// running the patience out before the settle could be asked (the sweep, lane 2).
+    @Test(.timeLimit(.minutes(1)))
+    func wordsBecomeACommandAfterAPause() async throws {
+        let bench = bench(patience: .seconds(3600))
         let stream = try await bench.route.start(vocabulary: [])
-        #expect(await eventually { bench.recogniser.wasStarted })
+        await bench.recogniser.untilStarted()
+        #expect(bench.recogniser.wasStarted)
         bench.recogniser.hear("make the button", isFinal: false)
         bench.recogniser.hear("Make the button blue", isFinal: true)
-        let seen = await events(from: stream) { [self] in !commands(in: $0).isEmpty }
+        let seen = await everyEvent(from: stream) { [self] in !commands(in: $0).isEmpty }
         #expect(seen.contains(.hearing("make the button")))
         #expect(seen.contains(.hearing("Make the button blue")))
         #expect(commands(in: seen) == ["Make the button blue"])

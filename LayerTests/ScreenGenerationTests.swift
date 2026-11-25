@@ -294,16 +294,21 @@ struct ScreenGenerationLifecycleTests {
     /// Undo pressed while a screen is written takes it away. The generation still
     /// finishes: it used to stay "writing" for good, with every later one refused and its
     /// own undo step never closed (B-I1).
-    @Test func aGenerationWhoseScreenIsTakenAwayStillFinishes() async throws {
+    ///
+    /// It waits on the first update's commit and then on the generation itself, never on a clock: polled against 3 s
+    /// each, a stall of the main actor that every suite shares ran the limit out first (the sweep, lane 2).
+    @Test(.timeLimit(.minutes(1)))
+    func aGenerationWhoseScreenIsTakenAwayStillFinishes() async throws {
         let (app, undo, feed) = bench()
         app.generateScreen(from: "a settings screen")
         let screen = try #require(app.generation?.screenID)
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { app.store.screenLeaves(screen).count == 1 })
+        #expect(await observed { app.store.screenLeaves(screen).count == 1 })
         undo.undo()
         #expect(app.store.treeScreen(screen) == nil)
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
-        #expect(await eventually { !app.isGenerating })
+        await app.waitForGeneration()
+        #expect(!app.isGenerating)
         #expect(app.generation == nil)
         #expect(app.store.treeScreen(screen) == nil)
         // Its edit is closed: a change now is a step of its own.
