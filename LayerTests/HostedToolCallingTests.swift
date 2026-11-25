@@ -68,13 +68,9 @@ extension SSE {
         String(String(data: try! JSONSerialization.data(withJSONObject: [text]), encoding: .utf8)!.dropFirst().dropLast())
     }
 
-    /// A screen of a heading and a button, as a hosted model writes one: A2UI 1.0, a message per line.
+    /// A screen of a heading and a button, as a hosted model writes one: the outline, a line each.
     static func screen(title: String, button: String) -> [String] {
-        [
-            #"{"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}"# + "\n",
-            ###"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["title","action"]},{"id":"title","component":"Text","text":"## \###(title)"}]}}"### + "\n",
-            #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"action","component":"Button","child":"action_label","variant":"primary","action":{"event":{"name":"go"}}},{"id":"action_label","component":"Text","text":"\#(button)"}]}}"# + "\n",
-        ]
+        ["title: \(title)\n", "button: \(button)\n"]
     }
 }
 

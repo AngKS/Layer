@@ -429,7 +429,7 @@ struct DeviceReflowTests {
         #expect(model.store.placed(cards[1].id)?.frame == CGRect(x: 310, y: 344, width: 200, height: 120))
     }
 
-    /// A background that fills the screen fills the new one; a locked one stays (A5, ported from ScreenTidy's
+    /// A background that fills the screen fills the new one; a locked one stays (A5, ported from the old tidy's
     /// `aBackgroundFillsTheNewDevice`, retired under (o)).
     @Test func aBackgroundFillsTheNewDevice() throws {
         let background = node(CGRect(x: 0, y: 0, width: 393, height: 852), .shape)

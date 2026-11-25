@@ -213,16 +213,8 @@ final class HostedModelTests {
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     @MainActor
     func aGeneratedScreenFillsInOnTheCanvasAndUndoesInOneStep() async throws {
-        // A2UI, a message per line, as hosted models write a screen; one line arrives in two pieces, and the last
-        // has no newline.
-        let lines = [
-            #"{"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}"# + "\n",
-            ###"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["title","email","password","sign_in"]},{"id":"title","component":"Text","text":"## Welcome back"}]}}"### + "\n",
-            #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"email","component":"TextField","label":"Email","value":""}]}}"# + "\n",
-            #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"password","component":"TextField","label":"Pass"#,
-            #"word","value":""}]}}"# + "\n",
-            #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"sign_in","component":"Button","child":"sign_in_label","variant":"primary","action":{"event":{"name":"signIn"}}},{"id":"sign_in_label","component":"Text","text":"Sign in"}]}}"#,
-        ]
+        // The outline, as hosted models write a screen; one line arrives in two pieces, and the last has no newline.
+        let lines = ["title: Welcome back\n", "text field: Email\n", "text field: Pass", "word\n", "button: Sign in [blue]"]
         StubProvider.answer(with: .init(body: SSE.openAI(text: lines)))
         let app = AppModel(document: LayerDocument())
         let undo = UndoManager()
@@ -259,12 +251,7 @@ final class HostedModelTests {
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     func aModelIsThinkingUntilItsAnswerStarts() async throws {
-        let lines = [
-            #"{"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}"# + "\n",
-            ###"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["title","go"]},{"id":"title","component":"Text","text":"## Hi"}]}}"### + "\n",
-            #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"go","component":"Button","child":"go_label","variant":"primary","action":{"event":{"name":"go"}}},{"id":"go_label","component":"Text","text":"Go"}]}}"# + "\n",
-        ]
-        StubProvider.answer(with: .init(body: SSE.openAI(text: lines, thinking: ["The user wants", " a short screen."])))
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Hi\n", "button: Go\n"], thinking: ["The user wants", " a short screen."])))
         var updates: [ScreenGenerator.Update] = []
         for try await update in ScreenGenerator.stream(ScreenGenerator.Request(description: "a tiny screen", choice: .hosted(.openAI, model: "m"))) {
             updates.append(update)

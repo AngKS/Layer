@@ -227,15 +227,15 @@ struct A2UIGenerationTests {
 
     // MARK: - Which format, and what the model is told
 
-    @Test func hostedModelsWriteA2UIAndTheDeviceTheOutline() {
-        #expect(ScreenGenerator.hostedFormat == .a2ui)
+    @Test func hostedModelsAndTheDeviceWriteTheOutline() {
+        #expect(ScreenGenerator.hostedFormat == .outline)
         #expect(ScreenGenerator.format(for: .appleIntelligence) == .outline)
         let hosted = ModelChoice.hosted(.openAI, model: "m")
-        #expect(ScreenGenerator.format(for: hosted) == (HostedLanguageModel.isSupported ? .a2ui : .outline))
-        // Each is told its own format.
+        #expect(ScreenGenerator.format(for: hosted) == .outline)
+        // Each is told its own prompt.
         #expect(ScreenGenerator.instructions(for: "a profile", using: .appleIntelligence) == ScreenPrompt.instructions(.compact, for: "a profile"))
         #expect(ScreenGenerator.instructions(for: "a profile", using: hosted)
-            == (HostedLanguageModel.isSupported ? A2UIPrompt.instructions(for: "a profile") : ScreenPrompt.instructions(.compact, for: "a profile")))
+            == ScreenPrompt.instructions(HostedLanguageModel.isSupported ? .full : .compact, for: "a profile"))
     }
 
     @Test func everyA2UIExampleImportsCleanlyAndMatchesItsOutline() throws {
@@ -333,7 +333,7 @@ extension HostedModelTests {
             #""callFunction":{"@call":"openUrl","args":{"url":"https://example.com"},"catalogId":"urn:layer:a2ui:catalog:1"}}}"#
         StubProvider.answer(with: .init(body: SSE.openAI(text: (A2UIGenerationTests.signIn + [call]).map { $0 + "\n" })))
         var updates: [ScreenGenerator.Update] = []
-        for try await update in ScreenGenerator.stream(ScreenGenerator.Request(description: "a sign-in screen", choice: .hosted(.openAI, model: "m"))) {
+        for try await update in ScreenGenerator.stream(ScreenGenerator.Request(description: "a sign-in screen", choice: .hosted(.openAI, model: "m")), format: .a2ui) {
             updates.append(update)
         }
         let leftOut = updates.compactMap { if case .leftOut(let diagnostics) = $0 { diagnostics } else { nil } }
@@ -347,7 +347,7 @@ extension HostedModelTests {
         // A screen whose only diagnostics are its buttons' actions left nothing out, so says nothing.
         StubProvider.answer(with: .init(body: SSE.openAI(text: A2UIGenerationTests.signIn.map { $0 + "\n" })))
         var whole: [ScreenGenerator.Update] = []
-        for try await update in ScreenGenerator.stream(ScreenGenerator.Request(description: "a sign-in screen", choice: .hosted(.openAI, model: "m"))) {
+        for try await update in ScreenGenerator.stream(ScreenGenerator.Request(description: "a sign-in screen", choice: .hosted(.openAI, model: "m")), format: .a2ui) {
             whole.append(update)
         }
         #expect(!whole.contains { if case .leftOut = $0 { true } else { false } }, "\(whole)")

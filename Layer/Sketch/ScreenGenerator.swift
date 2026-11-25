@@ -4,9 +4,10 @@ import Foundation
 /// Writes a whole screen from a description, with the design's own model, and streams it:
 /// the model writes the screen a line at a time, and each time a finished line adds to it the
 /// screen so far is handed on as a keyed tree, so the canvas can show it growing while the
-/// model is still writing. The on-device model writes an outline (`Outline`, read by
-/// `OutlineStream`); a hosted one writes A2UI 1.0, a message per line (`A2UIStream`), and what
-/// of that couldn't be brought in is said at the end (`Update.leftOut`).
+/// model is still writing. Every model writes an outline (`Outline`, read by `OutlineStream`):
+/// the on-device model with the compact prompt, a hosted one with the full prompt (`hostedFormat`).
+/// A screen asked for in A2UI 1.0, a message per line (`A2UIStream`), says at the end what of it
+/// couldn't be brought in (`Update.leftOut`).
 ///
 /// Every model goes through a Foundation Models `LanguageModelSession`: the on-device
 /// Apple Intelligence model, or a hosted one (`HostedLanguageModel`).
@@ -23,14 +24,16 @@ enum ScreenGenerator {
 
     /// What a model writes a screen in.
     enum Format: String, Sendable, CaseIterable {
-        /// The indented outline (`Outline`): the on-device model's, and the hosted fallback.
+        /// The indented outline (`Outline`): what every model writes (`format(for:)`).
         case outline
         /// A2UI 1.0 in Layer's catalogue, a message per line (`A2UIPrompt`).
         case a2ui
     }
 
-    /// What hosted models write until plan 6 measures (My call 17). Flipping it to .outline is the fallback.
-    static let hostedFormat = Format.a2ui
+    /// What hosted models write: the outline, by My call 8's rule on plan 6's measure. On LM Studio
+    /// (`google/gemma-4-26b-a4b`, 24 screens of each) the outline was 24 of 24 valid and A2UI 13 of 24, and A2UI's
+    /// first content came 33% later (docs/benchmarks/screen-prompt.md). Until then it was A2UI (My call 17).
+    static let hostedFormat = Format.outline
 
     /// The outline for the on-device model, and for a hosted model this system can't run (which falls back to it);
     /// `hostedFormat` for a hosted model.

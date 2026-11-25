@@ -199,7 +199,7 @@ struct TidyTests {
     // MARK: - What rides on a picture (plan 5's final review, A5)
 
     /// A caption and a button laid on a photo stay on it, in the same place, when tidying moves the photo into its column,
-    /// and in front of the column, where the photo doesn't cover them (A2). Ported from ScreenTidy's
+    /// and in front of the column, where the photo doesn't cover them (A2). Ported from the old tidy's
     /// `aCaptionOnAnImageRidesWithIt`, retired under (o), with the title, photo and body on one margin, since the pass
     /// builds only what lines up.
     @Test func aCaptionOnAPictureRidesWithIt() throws {
@@ -223,7 +223,7 @@ struct TidyTests {
         }
     }
 
-    /// A label on a shape goes where the shape goes. Ported from ScreenTidy's `whatRidesOnAShapeStaysWithIt`, retired
+    /// A label on a shape goes where the shape goes. Ported from the old tidy's `whatRidesOnAShapeStaysWithIt`, retired
     /// under (o): the shape is no longer left out of the layout, so the label rides it instead.
     @Test func whatRidesOnAShapeStaysWithIt() throws {
         let title = node(.title, CGRect(x: 20, y: 90, width: 353, height: 40))
@@ -247,7 +247,7 @@ struct TidyTests {
     // MARK: - A background (plan 5's final review, follow-up to A5)
 
     /// A background that fills the screen is no host: nothing is laid on it, so the title, the field and the button on
-    /// top of it are tidied as usual and the background stays (ported from ScreenTidy's `aFullScreenBackgroundIsNotAHost`,
+    /// top of it are tidied as usual and the background stays (ported from the old tidy's `aFullScreenBackgroundIsNotAHost`,
     /// retired under (o), its assertions kept: the three are on the margin, the button as wide as the column). Holding
     /// both neighbours of each gap, it lies under them, not between them.
     @Test func aFullScreenBackgroundIsNotAHost() throws {
@@ -272,7 +272,7 @@ struct TidyTests {
         }
     }
 
-    /// A locked background that fills the screen is no obstacle: the rest is still tidied (ported from ScreenTidy's
+    /// A locked background that fills the screen is no obstacle: the rest is still tidied (ported from the old tidy's
     /// `aLockedFullScreenBackgroundIsNotAnObstacle`, retired under (o), its assertions kept).
     @Test func aLockedFullScreenBackgroundIsNotAnObstacle() throws {
         var background = node(.image, CGRect(x: 0, y: 0, width: 393, height: 852))
@@ -292,7 +292,7 @@ struct TidyTests {
     }
 
     /// What lies on a locked picture stays where it is, with the picture, while the rest is tidied. Ported from
-    /// ScreenTidy's `whatRidesOnALockedPictureStaysPut`, retired under (o), with the rest on one margin.
+    /// the old tidy's `whatRidesOnALockedPictureStaysPut`, retired under (o), with the rest on one margin.
     @Test func whatRidesOnALockedPictureStaysPut() throws {
         let title = node(.title, CGRect(x: 20, y: 80, width: 353, height: 40))
         let field = node(.textField, CGRect(x: 20, y: 140, width: 353, height: 48))
@@ -309,7 +309,7 @@ struct TidyTests {
         #expect(model.store.placed(caption.id)?.frame == caption.frame)
     }
 
-    /// A caption that only strays over a picture's edge doesn't ride it, and stays where it was. Ported from ScreenTidy's
+    /// A caption that only strays over a picture's edge doesn't ride it, and stays where it was. Ported from the old tidy's
     /// `anAccidentalOverlapIsStillSeparated`, retired under (o), as far as riding goes: tidying no longer moves what isn't
     /// laid out, so it isn't moved off the picture either. Six tenths of it lie on the photo, short of nine.
     @Test func aCaptionHalfOverAPictureDoesNotRide() throws {

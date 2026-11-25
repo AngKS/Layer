@@ -510,7 +510,7 @@ with 20 tools.
 **The older tools, against 2026-11-21.** These are `newtools` and its five controls. Task 7 of plan 6 reworded the
 `device` guides of `createScreen` and `changeScreenDevice`, and gave `moveElement` its `takeOut`.
 
-| Commands | 2026-11-21 (20 tools): right, right tool | 2026-11-25, all tools | 2026-11-25, the on-device list |
+| Commands | 2026-11-21 (20 tools): right, right tool | 2026-11-25, all tools: right, right tool | 2026-11-25, the on-device list: right, right tool |
 |---|---|---|---|
 | Tidy, 11 commands | 50 of 55, 52 of 55 | 50 of 55, 50 of 55 | 50 of 55, 50 of 55 |
 | Change device, 5 commands | 25 of 25, 25 of 25 | 25 of 25, 25 of 25 | 25 of 25, 25 of 25 |
@@ -582,9 +582,15 @@ The run was made under other lanes' builds, at a load of 64 to 91, so its times 
 - "Take the toggle out of the row" still went to `ungroup` 5 times in 5: the take-out sentence didn't move it.
 - "Put these in a column" now names only the two fields, E8 and E9, but still goes to `stackElements`.
 
-**The older tools.**
+**The older tools.** The older tools' on-device numbers are lower than before: the controls are 15 of 25 right, against
+20 this morning, and the new screen 20 of 30, against 25 on 2026-11-21. Both are within the bar, which needs 13 of 25
+for the controls and sets no floor for the new-screen row.
 
-| Commands | Before the fix | The new wording | With the empty canvas's rules too |
+Every run in this round handed the model the on-device list, without `--all-tools`. "Before the fix" is this
+morning's run of the on-device list (10:27:38); the all-tools run (10:18:30) scored the same in every row. Each cell is
+two numbers: right, then right tool.
+
+| Commands | Before the fix, on-device list: right, right tool | The new wording, on-device list: right, right tool | With the empty canvas's rules too, on-device list: right, right tool |
 |---|---|---|---|
 | Tidy, 11 commands | 50 of 55, 50 of 55 | 50 of 55, 50 of 55 | 50 of 55, 50 of 55 |
 | Change device, 5 commands | 25 of 25, 25 of 25 | 25 of 25, 25 of 25 | 25 of 25, 25 of 25 |
