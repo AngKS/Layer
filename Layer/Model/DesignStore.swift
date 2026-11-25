@@ -13,7 +13,6 @@ final class DesignStore {
     private(set) var content: TreeContent {
         didSet {
             guard content != oldValue else { return }
-            kept = nil
             targets = nil
             changeCount += 1
             // A change made through `change(_:)` is told once it has been recorded: see there.
@@ -54,17 +53,19 @@ final class DesignStore {
     /// spoken correction checks it to be sure the step on top is still its command's.
     @ObservationIgnored private(set) var historyMark = 0
 
-    /// What is worked out from the tree for the content as it is now, each part when it is
-    /// first asked for: where every node is.
-    private struct Kept {
-        /// Made by `index` when it is first read.
-        var index: TreeIndex?
+    /// Where every node is (`TreeIndex`), as last worked out, with the content it was worked out for and that content's
+    /// version (`changeCount`). Read for a later version, it is brought up to date where the content changed since
+    /// (`TreeIndex.refresh(from:to:)`), rather than built again over the whole design.
+    private struct KeptIndex {
+        var index: TreeIndex
+        var content: TreeContent
+        var version: Int
     }
-    @ObservationIgnored private var kept: Kept?
+    @ObservationIgnored private var keptIndex: KeptIndex?
 
     #if DEBUG
-    /// How many times this store has built its index: at most once for each version of the content
-    /// that was read. For the tests that hold a gesture's frames to building it only when they need it.
+    /// How many times this store has built its index, or brought it up to date: at most once for each version of the
+    /// content that was read. For the tests that hold a gesture's frames to building it only when they need it.
     @ObservationIgnored private(set) var timesIndexed = 0
     #endif
 
@@ -76,17 +77,24 @@ final class DesignStore {
     var tree: TreeContent { content }
 
     /// Where every node of the tree is, worked out once per version of the content, when it is
-    /// first asked for: see `TreeIndex`.
+    /// first asked for: see `TreeIndex`. The one worked out for an earlier version is brought up to
+    /// date where the content changed since, so a change pays for what it touched.
     var index: TreeIndex {
         // Read first, so that whatever reads it is redrawn when the content changes.
         let content = content
-        if let index = kept?.index { return index }
-        let index = TreeIndex(content)
+        if let keptIndex, keptIndex.version == changeCount { return keptIndex.index }
+        let index: TreeIndex
+        if var kept = keptIndex {
+            // Let go of first, so that the index is brought up to date in place rather than copied.
+            keptIndex = nil
+            index = kept.index.refresh(from: kept.content, to: content) ? kept.index : TreeIndex(content)
+        } else {
+            index = TreeIndex(content)
+        }
         #if DEBUG
         timesIndexed += 1
         #endif
-        if kept == nil { kept = Kept() }
-        kept?.index = index
+        keptIndex = KeptIndex(index: index, content: content, version: changeCount)
         return index
     }
 
