@@ -443,4 +443,97 @@ import Testing
         #expect(LayoutEngine.timesLaidOut(edited) - laidOutBefore == 50)
         #expect(p95 < .milliseconds(16))
     }
+
+    // MARK: - A change to a design that follows the rules
+
+    /// The changes `lookingOnlyAtWhatChangedGivesWhatLookingAtEverythingGives` makes to `messyDesign` once it follows
+    /// the rules, each for the structure passes or the layout to find something to do, or nothing.
+    private static func changes() -> [(String, (inout TreeContent) -> Void)] { [
+        ("a text edited on a column screen", { $0.screens[0].root.children[0].content.text += " and more words than before" }),
+        ("a drawing put on a free screen", { $0.screens[1].root.children.append(node(.drawing, CGRect(x: 10, y: 10, width: 40, height: 40))) }),
+        ("a sticky note put in a row", { $0.screens[0].root.children[1].children.append(node(.stickyNote, CGRect(x: 0, y: 0, width: 150, height: 150))) }),
+        ("a free group of one put on a screen", {
+            $0.screens[1].root.children.append(group(CGRect(x: 50, y: 500, width: 10, height: 10), [node(.shape, CGRect(x: 0, y: 0, width: 30, height: 30))]))
+        }),
+        ("an empty group put on the canvas", { $0.canvas.append(group(CGRect(x: 3000, y: 0, width: 10, height: 10), [])) }),
+        ("a drawing put in a canvas row", { $0.canvas[1].children.append(node(.drawing, CGRect(x: 0, y: 0, width: 20, height: 20))) }),
+        ("a screen's device changed", { $0.screens[1].deviceID = nil }),
+        ("a screen added holding a sticky note", {
+            $0.screens.append(screen(origin: CGPoint(x: 1500, y: 0), [node(.stickyNote, CGRect(x: 0, y: 0, width: 150, height: 150)),
+                                                                       generated(.text, "Beside it")]))
+        }),
+        ("a look changed", { $0.screens[0].root.children[1].children[1].style.tint = RGBColor(hex: 0xFF3B30) }),
+        ("a container hidden", { $0.screens[0].root.children[1].isHidden = true }),
+        ("a node locked and named", {
+            $0.screens[1].root.children[0].isLocked = true
+            $0.screens[1].root.children[0].name = "Named"
+        }),
+        ("the title's size changed", { $0.settings.tokens.textSizes.title += 4 }),
+        ("the body's size changed", { $0.settings.tokens.textSizes.body += 2 }),
+        ("the card's radius changed", { $0.settings.tokens.card.radius += 4 }),
+        ("the rhythm changed", { $0.settings.tokens.rhythm = [4, 8, 16] }),
+        ("a canvas node moved", { $0.canvas[0].frame.origin.x += 10 }),
+        ("a canvas row restyled", { $0.canvas[1].children[0].style.textColor = RGBColor(hex: 0x34C759) }),
+        ("a screen taken away", { $0.screens.removeFirst() }),
+        ("the canvas reordered", { $0.canvas.reverse() }),
+        ("nothing", { _ in }),
+    ] }
+
+    /// For a change to a design that follows every rule, laid out in full, looking only at what changed
+    /// (`apply(to:after:kept:)`, as the store applies the rules) gives what looking at everything gives.
+    @Test func lookingOnlyAtWhatChangedGivesWhatLookingAtEverythingGives() {
+        let kept = Self.applied(Self.messyDesign())
+        #expect(Self.applied(kept) == kept, "the design follows the rules")
+        for (what, change) in Self.changes() {
+            var edited = kept
+            change(&edited)
+            var everything = edited, onlyWhatChanged = edited
+            TreeRules.apply(to: &everything, after: kept)
+            TreeRules.apply(to: &onlyWhatChanged, after: kept, kept: kept)
+            #expect(onlyWhatChanged == everything, "after \(what)")
+            #expect(Self.applied(onlyWhatChanged) == onlyWhatChanged, "after \(what), the design still follows the rules in full")
+        }
+    }
+
+    /// A store whose design follows the rules keeps it so through a run of changes, undo and redo among them, each
+    /// looking only at what it changed: laying the whole design out again changes nothing after any of them.
+    @MainActor
+    @Test func aStoresDesignFollowsTheRulesInFullAfterEveryChange() throws {
+        let store = DesignStore(content: Self.applied(Self.messyDesign()))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        store.undoManager = undo
+        let column = store.tree.screens[0].root, free = store.tree.screens[1].root
+        let listRow = column.children[1], card = column.children[2]
+        var checked = 0
+        func check(_ what: String) {
+            #expect(Self.applied(store.tree) == store.tree, "after \(what)")
+            checked += 1
+        }
+        store.update(listRow.children[0].id) { $0.content.text = "A much longer label, wrapping now" }
+        check("a text in a row")
+        store.update(card.id) { $0.padding = LayerNode.Padding(all: 24) }
+        check("a card's padding")
+        store.update(listRow.children[1].id) { $0.style.tint = RGBColor(hex: 0xFF3B30) }
+        check("a look")
+        store.update(free.children[1].id) { $0.rotation = 45 }
+        check("a row turned")
+        #expect(store.add(Self.generated(.body, "Added"), to: .node(card.id), at: 0))
+        check("an add to a card")
+        store.delete(nodes: [listRow.children[1].id])
+        check("a delete from a row")
+        store.updateCanvas { $0.tokens.textSizes.title = 34 }
+        check("the title's size")
+        store.updateCanvas { $0.tokens.card.radius = 4 }
+        check("the card's radius")
+        store.update(card.id) { $0.isHidden = true }
+        check("a card hidden")
+        undo.undo()
+        check("an undo")
+        undo.undo()
+        check("another undo")
+        undo.redo()
+        check("a redo")
+        #expect(checked == 12)
+    }
 }

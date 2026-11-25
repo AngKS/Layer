@@ -69,8 +69,21 @@ final class DesignStore {
     @ObservationIgnored private(set) var timesIndexed = 0
     #endif
 
+    /// Whether the content follows every one of the tree's rules, laid out in full, as a design read from a file does
+    /// (`DesignFile`): then a change's rules look only at what it changed (`TreeRules.apply(to:after:kept:)`). Worked
+    /// out as the store is made, and kept by every change after, each of which runs the rules.
+    @ObservationIgnored private let followsTheRules: Bool
+
     init(content: TreeContent = TreeContent()) {
         self.content = content
+        followsTheRules = Self.followsTheRules(content)
+    }
+
+    /// Whether the rules, applied in full, leave `content` as it is.
+    private static func followsTheRules(_ content: TreeContent) -> Bool {
+        var applied = content
+        TreeRules.apply(to: &applied, after: nil)
+        return applied == content
     }
 
     /// The design's tree. Read through `content`, so that whatever reads it is redrawn when it changes.
@@ -754,8 +767,8 @@ final class DesignStore {
         // The change and the tree's rules after it, in one access to the content, so that the
         // whole design is compared once (C6).
         let isUndoingOrRedoing = undoManager.map { $0.isUndoing || $0.isRedoing } ?? false
-        Self.applying(body, to: &content, previous: before, laidOutAhead: ahead, followingPlacements: !keepsPlacementIntents,
-                      decliningWhatLeftAStructure: !isUndoingOrRedoing)
+        Self.applying(body, to: &content, previous: before, followingTheRules: followsTheRules, laidOutAhead: ahead,
+                      followingPlacements: !keepsPlacementIntents, decliningWhatLeftAStructure: !isUndoingOrRedoing)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -788,7 +801,9 @@ final class DesignStore {
         return true
     }
 
-    /// Makes a change, then runs the tree's rules, laying out what changed since `previous`.
+    /// Makes a change, then runs the tree's rules, laying out what changed since `previous`. With `followingTheRules`,
+    /// `previous` follows every rule already (`followsTheRules`), so the rules look only at what the change touched
+    /// (`TreeRules.apply(to:after:kept:)`).
     ///
     /// A screen whose root was laid out ahead, and is that root now, is laid out already: the rules are told it was
     /// that root before, so they find nothing changed there and lay nothing out (plan 3, call 6).
@@ -806,13 +821,14 @@ final class DesignStore {
     /// change, and so of its step (plan 5's final review, A9): undoing the move takes them away, and redo puts them
     /// back. Not after an undo or a redo, which never come through here anyway.
     private static func applying(_ body: (inout TreeContent) -> Void, to content: inout TreeContent, previous: TreeContent,
-                                 laidOutAhead: [TreeScreen.ID: LayerNode] = [:], followingPlacements: Bool,
-                                 decliningWhatLeftAStructure: Bool) {
+                                 followingTheRules: Bool, laidOutAhead: [TreeScreen.ID: LayerNode] = [:],
+                                 followingPlacements: Bool, decliningWhatLeftAStructure: Bool) {
         body(&content)
         // What the change itself wrote, before the rules lay anything out: only that is the person's placing. Held as a
         // value, it is copied only where the rules then change the tree.
         let written = followingPlacements ? content : nil
-        TreeRules.apply(to: &content, after: holding(laidOutAhead, in: previous, as: content))
+        TreeRules.apply(to: &content, after: holding(laidOutAhead, in: previous, as: content),
+                        kept: followingTheRules ? previous : nil)
         if let written { content.followPlacements(since: previous, written: written) }
         if decliningWhatLeftAStructure {
             let leaving = takenOutOfStructures(from: previous, to: content)
@@ -1074,7 +1090,7 @@ final class DesignStore {
         var result = step.undone(from: current)
         // Taken back among changes made since, a step can leave the tree as its rules wouldn't:
         // put right here, so that the reverse step holds it too.
-        TreeRules.apply(to: &result, after: current)
+        TreeRules.apply(to: &result, after: current, kept: followsTheRules ? current : nil)
         content = result
         let reverse = HistoryStep(runs: [.init(before: current, after: result)])
         reverse.isCommand = step.isCommand

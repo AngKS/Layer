@@ -29,20 +29,58 @@ enum TreeRules {
     static let maximumNodes = 5_000
 
     /// Structure first, then layout of what changed since `previous` (everything when nil). Idempotent.
+    ///
+    /// `kept` is a version of the design that already follows every rule, laid out in full: the store's version before
+    /// its change (`DesignStore.followsTheRules`). A screen whose root and device are as they are there, and a node on
+    /// the canvas's top level the same as its own there, follow the structure already, so the structure passes look
+    /// only at the rest: a change pays for what it touched, not for the whole design (plan 6's final review B, M1 and
+    /// M2). What comes of it is the same as without.
     @discardableResult
-    static func apply(to content: inout TreeContent, after previous: TreeContent?,
+    static func apply(to content: inout TreeContent, after previous: TreeContent?, kept: TreeContent? = nil,
                       measure: TextMeasure = .shared) -> [LayoutDiagnostic] {
-        for index in content.screens.indices {
+        let screensKept = kept.map { unchangedScreens(in: content, since: $0) }
+        for index in content.screens.indices where screensKept?[index] != true {
             keepToDevice(&content.screens[index], on: content.device(of: content.screens[index]))
         }
-        moveToCanvas(&content)
-        for index in content.screens.indices {
+        let canvasKept = kept.map { KeptNodes($0.canvas) }
+        moveToCanvas(&content, screensKept: screensKept, canvasKept: canvasKept)
+        for index in content.screens.indices where screensKept?[index] != true {
             tidyInside(&content.screens[index].root)
         }
         let count = content.canvas.count
-        let removed = tidy(&content.canvas)
+        let removed = tidy(&content.canvas, besides: canvasKept)
         keepUnreadPlaces(&content.unreadCanvas, among: count, removing: removed)
         return layOut(&content, after: previous, measure: measure)
+    }
+
+    // MARK: - What is as it was
+
+    /// For each of `content`'s screens, in order, whether `kept` has it with the same root on the same device: then it
+    /// follows the structure already.
+    private static func unchangedScreens(in content: TreeContent, since kept: TreeContent) -> [Bool] {
+        let earlier = Dictionary(kept.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return content.screens.map { screen in
+            guard let before = earlier[screen.id] else { return false }
+            return before.root == screen.root && kept.device(of: before) == content.device(of: screen)
+        }
+    }
+
+    /// The canvas's top-level nodes of a version that follows the rules: a node the same as its own there follows the
+    /// structure already. Looked up by id only once a node isn't where it was.
+    private final class KeptNodes {
+        let nodes: [LayerNode]
+        private lazy var byID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        init(_ nodes: [LayerNode]) {
+            self.nodes = nodes
+        }
+
+        /// Whether `nodes[index]`, among `list`, is as it is here.
+        func holds(_ list: [LayerNode], at index: Int) -> Bool {
+            let node = list[index]
+            if nodes.indices.contains(index), nodes[index].id == node.id { return nodes[index] == node }
+            return byID[node.id] == node
+        }
     }
 
     /// The margin round a device's column: its token (20, 32 and 48 for the built-in families).
@@ -76,10 +114,11 @@ enum TreeRules {
     // MARK: - 2 and 3. Drawings and sticky notes
 
     /// Moves every drawing off the screens and out of the canvas's containers, and every sticky
-    /// note off the screens, to the canvas's top level, where each was on the canvas.
-    private static func moveToCanvas(_ content: inout TreeContent) {
+    /// note off the screens, to the canvas's top level, where each was on the canvas. A screen kept as it was
+    /// (`screensKept`) and a top-level node as it was (`canvasKept`) hold none.
+    private static func moveToCanvas(_ content: inout TreeContent, screensKept: [Bool]?, canvasKept: KeptNodes?) {
         var moved: [LayerNode] = []
-        for index in content.screens.indices {
+        for index in content.screens.indices where screensKept?[index] != true {
             let screen = content.screens[index]
             // From the screen's points to the canvas's, at the screen's scale: the same size in
             // its own points, and drawn at the same size.
@@ -93,7 +132,9 @@ enum TreeRules {
             }
         }
         // Looked for first, so that a canvas with nothing to move isn't copied to look inside it.
-        for index in content.canvas.indices where holds(content.canvas[index], where: isDrawing) {
+        let canvas = content.canvas
+        let looked = canvasKept.map { kept in canvas == kept.nodes ? [] : canvas.indices.filter { !kept.holds(canvas, at: $0) } }
+        for index in looked ?? Array(canvas.indices) where holds(content.canvas[index], where: isDrawing) {
             let top = content.canvas[index]
             // In the space the top-level node sits in, so at its scale.
             for var node in takeOut(from: &content.canvas[index], where: isDrawing) {
@@ -137,8 +178,13 @@ enum TreeRules {
 
     /// Removes the empty groups among `nodes` and dissolves the free groups of one, and does
     /// the same inside each first, so that a group left empty or alone by that goes too.
-    /// Returns the indices of those removed.
-    private static func tidy(_ nodes: inout [LayerNode]) -> [Int] {
+    /// Returns the indices of those removed. A node `kept` holds as it is needs none of it.
+    private static func tidy(_ nodes: inout [LayerNode], besides kept: KeptNodes? = nil) -> [Int] {
+        let list = nodes
+        if let kept {
+            guard list != kept.nodes, list.indices.contains(where: { !kept.holds(list, at: $0) && needsTidying(list[$0]) })
+            else { return [] }
+        }
         guard nodes.contains(where: needsTidying) else { return [] }
         var kept: [LayerNode] = [], removed: [Int] = []
         for (index, var node) in nodes.enumerated() {
