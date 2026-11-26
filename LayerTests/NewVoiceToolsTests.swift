@@ -580,4 +580,42 @@ struct NewVoiceToolsTests {
         #expect(VoiceProfile.onDeviceTools(bench.box, canEndCall: false, hasScreens: false).map(\.name)
             == VoiceTools.forEmptyCanvas(bench.box, canEndCall: false).map(\.name))
     }
+
+    /// Nothing the on-device model is handed names `setLayout` or `reorder`, which it isn't handed: not the descriptions
+    /// or argument guides of its tools, which a hosted model is handed too. What sends a hosted model to those two is in
+    /// the full rules and in their own descriptions (the 2026-11-26 structure wording).
+    @Test func theOnDeviceToolsNameOnlyItsTools() throws {
+        let bench = bench()
+        let handed = VoiceProfile.onDeviceTools(bench.box, canEndCall: true, hasScreens: true)
+        let handedNames = Set(handed.map(\.name))
+        let missing = VoiceTools.all(bench.box).map(\.name).filter { !handedNames.contains($0) }
+        #expect(Set(missing) == ["setLayout", "reorder"])
+        for tool in handed {
+            let guides = String(decoding: try JSONEncoder().encode(tool.parameters), as: UTF8.self)
+            for name in missing {
+                #expect(!tool.description.contains(name), "\(tool.name)'s description names \(name)")
+                #expect(!guides.contains(name), "\(tool.name)'s arguments name \(name)")
+            }
+        }
+    }
+
+    /// What the 2026-11-26 structure wording tells a hosted model, which was measured giving a spacing as a bare number
+    /// (the tool takes text, so the call couldn't be read) and, once it gave text, carrying out "space the row out more"
+    /// again and again as the canvas showed each change: docs/benchmarks/voice-on-device.md, "Structure wording".
+    @Test func aHostedModelIsToldToGiveTextAndCallOnce() throws {
+        #expect(VoiceRules.full.contains(#"Give every value a tool takes as text in quotes, numbers too: a spacing of "24", not 24."#))
+        #expect(VoiceRules.full.contains("Carry out a command once."))
+        #expect(VoiceRules.full.contains("is a call for each"))
+        #expect(VoiceRules.full.contains(#""45 more" is rotateElement with by 45, from where it is."#))
+        // The on-device model's rules keep their own turning line.
+        #expect(!VoiceRules.compact.contains("45 more"))
+        #expect(VoiceRules.full.contains("call no more tools"))
+        #expect(VoiceRules.full.contains(#"takeOut "yes", and x and y as values of their own, never written into takeOut"#))
+        let bench = bench()
+        let setLayout = try #require(VoiceTools.all(bench.box).first { $0.name == "setLayout" })
+        #expect(setLayout.description.contains("call it once, with a spacing one step from the one it had when the person spoke"))
+        #expect(setLayout.description.contains(#"For "a grid of two", the layout is "grid of 2""#))
+        let guides = String(decoding: try JSONEncoder().encode(setLayout.parameters), as: UTF8.self)
+        #expect(guides.contains(#"in points, as text, such as \"16\""#))
+    }
 }
