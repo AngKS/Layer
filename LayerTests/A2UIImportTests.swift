@@ -896,6 +896,22 @@ import UIKit
         #expect(A2UIIcons.symbol(for: "xyzzy plugh") == SystemSymbol.placeholder)
     }
 
+    /// What a model means by an icon's name (2026-11-26): A2UI's names are themselves, as are their spellings with
+    /// other capitals, underscores, hyphens or spaces; any other name is Layer's own symbol by that name.
+    @Test func aModelsIconNameIsReadAsItMeantIt() {
+        for name in A2UIIcons.symbols.keys {
+            #expect(A2UIIcons.meant(byIconNamed: name) == .icon(name))
+        }
+        #expect(A2UIIcons.meant(byIconNamed: "arrow_back") == .icon("arrowBack"))
+        #expect(A2UIIcons.meant(byIconNamed: "account-circle") == .icon("accountCircle"))
+        #expect(A2UIIcons.meant(byIconNamed: "Shopping Cart") == .icon("shoppingCart"))
+        #expect(A2UIIcons.meant(byIconNamed: "SETTINGS") == .icon("settings"))
+        #expect(A2UIIcons.meant(byIconNamed: "person.crop.circle") == .symbol("person.crop.circle"))
+        #expect(A2UIIcons.meant(byIconNamed: "chevron.right") == .symbol("chevron.right"))
+        #expect(A2UIIcons.meant(byIconNamed: "cloud-sun") == .symbol("cloud-sun"))
+        #expect(A2UIIcons.meant(byIconNamed: "") == .symbol(""))
+    }
+
     @Test func importingRunsOffTheMainActor() async throws {
         let data = try fixture("a2ui-user-profile")
         let result = await Task.detached { A2UIImporter.importJSON(data) }.value

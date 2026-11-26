@@ -73,4 +73,37 @@ enum A2UIIcons {
     static func symbol(for a2uiName: String) -> String {
         symbols[a2uiName] ?? SystemSymbol.resolve(a2uiName)
     }
+
+    // MARK: A model's icons
+
+    /// What a model meant by an icon's name.
+    enum Meant: Equatable, Sendable {
+        /// An A2UI icon, by A2UI's own name.
+        case icon(String)
+        /// Layer's own symbol (`LayerSymbol`), by the name as the model wrote it.
+        case symbol(String)
+    }
+
+    /// What a model meant by an `Icon` it named `name`, since models name icons as they know them. One of A2UI's names
+    /// is that icon. One with the same letters as an A2UI name, as Material spells it (`arrow_back`) or in other
+    /// capitals or with hyphens or spaces, is that A2UI icon. Any other, such as an SF Symbol's name (`chevron.right`)
+    /// or a word of the model's own, is Layer's own symbol by that name: drawn as an outline's `symbol:` line is, the
+    /// SF Symbol if there is one, else what `SystemSymbol` makes of the name, which may be the placeholder.
+    ///
+    /// Only a model's answer is read this way (`A2UIStream`): A2UI from a file or a paste is someone's own, and its
+    /// import says what in it isn't A2UI's.
+    static func meant(byIconNamed name: String) -> Meant {
+        if symbols[name] != nil { return .icon(name) }
+        if let a2uiName = byLetters[letters(of: name)] { return .icon(a2uiName) }
+        return .symbol(name)
+    }
+
+    /// A2UI's names by their letters (`letters(of:)`). No two of them share their letters.
+    private static let byLetters: [String: String] = Dictionary(uniqueKeysWithValues: symbols.keys.map { (letters(of: $0), $0) })
+
+    /// A name lowercased, without its underscores, hyphens and spaces: `arrow_back`, `Arrow-Back` and `arrowBack` are
+    /// all `arrowback`.
+    private static func letters(of name: String) -> String {
+        String(name.lowercased().filter { $0 != "_" && $0 != "-" && !$0.isWhitespace })
+    }
 }

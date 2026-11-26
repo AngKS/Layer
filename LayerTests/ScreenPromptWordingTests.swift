@@ -12,8 +12,9 @@ import Testing
         #expect(ScreenPrompt.instructions(.full, for: Self.brief) == Self.full)
     }
 
-    /// The A2UI prompt a model is told when a caller asks for A2UI: no model is by default since plan 6's measure, which
-    /// left the words as they were. A change to them changes this literal.
+    /// The A2UI prompt a model is told when it writes A2UI, as measured on 2026-11-26: a component a message, one way to
+    /// write an icon, a control's label always, ids in words, only what shows counted, and a line closing only its own
+    /// component. A change to them changes this literal.
     @Test func theA2UIPromptIsUnchanged() {
         #expect(A2UIPrompt.instructions(for: Self.brief) == Self.a2ui)
     }
@@ -132,12 +133,24 @@ import Testing
             keywords: ["setting", "preference", "notification", "privacy", "option", "toggle", "switch"],
             lines: """
                 {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","alerts","turn_off"]},{"id":"heading","component":"Text","text":"## Notifications"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"alerts","component":"Column","children":["push","summary","mentions","divider","quiet"]},{"id":"push","component":"Row","justify":"spaceBetween","align":"center","children":["push_label","push_switch"]},{"id":"push_label","component":"Text","text":"Push notifications"},{"id":"push_switch","component":"LayerToggle","label":"Push notifications","value":true}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary","component":"Row","justify":"spaceBetween","align":"center","children":["summary_label","summary_switch"]},{"id":"summary_label","component":"Text","text":"Daily summary"},{"id":"summary_switch","component":"LayerToggle","label":"Daily summary","value":false}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions","component":"Row","justify":"spaceBetween","align":"center","children":["mentions_label","mentions_switch"]},{"id":"mentions_label","component":"Text","text":"Mentions only"},{"id":"mentions_switch","component":"LayerToggle","label":"Mentions only","value":true}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"divider","component":"Divider"},{"id":"quiet","component":"Row","justify":"spaceBetween","align":"center","children":["quiet_label","quiet_hours"]},{"id":"quiet_label","component":"Text","text":"Quiet hours"},{"id":"quiet_hours","component":"Text","text":"22:00 – 07:00","variant":"caption"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"turn_off","component":"Button","child":"turn_off_label","variant":"borderless","action":{"event":{"name":"turnOffAllNotifications"}}},{"id":"turn_off_label","component":"Text","text":"Turn off all notifications"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","alerts","turn_off"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"heading","component":"Text","text":"## Notifications"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"alerts","component":"Column","children":["push","summary","mentions","divider","quiet"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"push","component":"Row","justify":"spaceBetween","align":"center","children":["push_label","push_switch"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"push_label","component":"Text","text":"Push notifications"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"push_switch","component":"LayerToggle","label":"Push notifications","value":true}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary","component":"Row","justify":"spaceBetween","align":"center","children":["summary_label","summary_switch"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary_label","component":"Text","text":"Daily summary"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary_switch","component":"LayerToggle","label":"Daily summary","value":false}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions","component":"Row","justify":"spaceBetween","align":"center","children":["mentions_label","mentions_switch"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions_label","component":"Text","text":"Mentions only"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions_switch","component":"LayerToggle","label":"Mentions only","value":true}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"divider","component":"Divider"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"quiet","component":"Row","justify":"spaceBetween","align":"center","children":["quiet_label","quiet_hours"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"quiet_label","component":"Text","text":"Quiet hours"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"quiet_hours","component":"Text","text":"22:00 – 07:00","variant":"caption"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"turn_off","component":"Button","child":"turn_off_label","variant":"borderless","action":{"event":{"name":"turnOffAllNotifications"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"turn_off_label","component":"Text","text":"Turn off all notifications"}]}}
                 """
         ),
         ScreenPrompt.Example(
@@ -145,11 +158,24 @@ import Testing
             keywords: ["product", "detail", "item", "article", "recipe", "post", "story", "listing", "shop", "store"],
             lines: """
                 {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["photo","about","details","actions"]},{"id":"photo","component":"Image","url":"","description":"A black cast-iron skillet"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"about","component":"Column","children":["name","summary"]},{"id":"name","component":"Text","text":"## Cast-iron skillet, 26 cm"},{"id":"summary","component":"Text","text":"Pre-seasoned and oven-safe. Ships in two days."}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"details","component":"Card","child":"details_rows"},{"id":"details_rows","component":"Column","children":["size","colour"]},{"id":"size","component":"Row","justify":"spaceBetween","align":"center","children":["size_label","size_value"]},{"id":"size_label","component":"Text","text":"Size"},{"id":"size_value","component":"Text","text":"26 cm"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour","component":"Row","justify":"spaceBetween","align":"center","children":["colour_label","colour_value"]},{"id":"colour_label","component":"Text","text":"Colour"},{"id":"colour_value","component":"Text","text":"Black"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"actions","component":"Column","children":["add","save"]},{"id":"add","component":"Button","child":"add_label","variant":"primary","action":{"event":{"name":"addToBag"}}},{"id":"add_label","component":"Text","text":"Add to bag"},{"id":"save","component":"Button","child":"save_label","variant":"borderless","action":{"event":{"name":"saveForLater"}}},{"id":"save_label","component":"Text","text":"Save for later"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["photo","about","details","actions"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"photo","component":"Image","url":"","description":"A black cast-iron skillet"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"about","component":"Column","children":["name","summary"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"name","component":"Text","text":"## Cast-iron skillet, 26 cm"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary","component":"Text","text":"Pre-seasoned and oven-safe. Ships in two days."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"details","component":"Card","child":"details_rows"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"details_rows","component":"Column","children":["size","colour"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"size","component":"Row","justify":"spaceBetween","align":"center","children":["size_label","size_value"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"size_label","component":"Text","text":"Size"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"size_value","component":"Text","text":"26 cm"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour","component":"Row","justify":"spaceBetween","align":"center","children":["colour_label","colour_value"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour_label","component":"Text","text":"Colour"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour_value","component":"Text","text":"Black"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"actions","component":"Column","children":["add","save"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"add","component":"Button","child":"add_label","variant":"primary","action":{"event":{"name":"addToBag"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"add_label","component":"Text","text":"Add to bag"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"save","component":"Button","child":"save_label","variant":"borderless","action":{"event":{"name":"saveForLater"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"save_label","component":"Text","text":"Save for later"}]}}
                 """
         ),
         ScreenPrompt.Example(
@@ -157,9 +183,25 @@ import Testing
             keywords: ["profile", "user", "bio", "follower", "member", "person", "contact"],
             lines: """
                 {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["person","work"]},{"id":"person","component":"Column","children":["avatar","name","bio","contact"]},{"id":"avatar","component":"Image","url":"","variant":"avatar","description":"Maya Okafor"},{"id":"name","component":"Text","text":"## Maya Okafor"},{"id":"bio","component":"Text","text":"Ceramicist in Lisbon. Small-batch tableware."}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"contact","component":"Row","align":"center","children":["follow","message"]},{"id":"follow","component":"Button","child":"follow_label","variant":"primary","action":{"event":{"name":"follow"}}},{"id":"follow_label","component":"Text","text":"Follow"},{"id":"message","component":"Button","child":"message_label","variant":"default","action":{"event":{"name":"message"}}},{"id":"message_label","component":"Text","text":"Message"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"work","component":"Column","children":["work_heading","work_grid"]},{"id":"work_heading","component":"Text","text":"Recent work"},{"id":"work_grid","component":"LayerGrid","columns":3,"children":["bowl","plate","mug","vase","jug","cup"]},{"id":"bowl","component":"Image","url":"","description":"A speckled bowl"},{"id":"plate","component":"Image","url":"","description":"A blue-rimmed plate"},{"id":"mug","component":"Image","url":"","description":"A stoneware mug"},{"id":"vase","component":"Image","url":"","description":"A tall glazed vase"},{"id":"jug","component":"Image","url":"","description":"A cream jug"},{"id":"cup","component":"Image","url":"","description":"A handleless cup"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["person","work"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"person","component":"Column","children":["avatar","name","bio","contact"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"avatar","component":"Image","url":"","variant":"avatar","description":"Maya Okafor"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"name","component":"Text","text":"## Maya Okafor"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"bio","component":"Text","text":"Ceramicist in Lisbon. Small-batch tableware."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"contact","component":"Row","align":"center","children":["follow","message"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"follow","component":"Button","child":"follow_label","variant":"primary","action":{"event":{"name":"follow"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"follow_label","component":"Text","text":"Follow"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"message","component":"Button","child":"message_label","variant":"default","action":{"event":{"name":"message"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"message_label","component":"Text","text":"Message"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"work","component":"Column","children":["work_heading","work_grid"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"work_heading","component":"Text","text":"Recent work"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"work_grid","component":"LayerGrid","columns":3,"children":["bowl","plate","mug","vase","jug","cup"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"bowl","component":"Image","url":"","description":"A speckled bowl"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"plate","component":"Image","url":"","description":"A blue-rimmed plate"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mug","component":"Image","url":"","description":"A stoneware mug"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"vase","component":"Image","url":"","description":"A tall glazed vase"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"jug","component":"Image","url":"","description":"A cream jug"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"cup","component":"Image","url":"","description":"A handleless cup"}]}}
                 """
         ),
         ScreenPrompt.Example(
@@ -167,12 +209,20 @@ import Testing
             keywords: ["form", "checkout", "payment", "address", "order", "booking", "book", "delivery", "shipping", "edit"],
             lines: """
                 {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","address","billing","next"]},{"id":"heading","component":"Text","text":"## Delivery address"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"address","component":"Column","children":["full_name","street","town","phone"]},{"id":"full_name","component":"TextField","label":"Full name","value":""},{"id":"street","component":"TextField","label":"Street and number","value":""}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"town","component":"Row","children":["postcode","city"]},{"id":"postcode","component":"TextField","label":"Postcode","value":""},{"id":"city","component":"TextField","label":"City","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","address","billing","next"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"heading","component":"Text","text":"## Delivery address"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"address","component":"Column","children":["full_name","street","town","phone"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"full_name","component":"TextField","label":"Full name","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"street","component":"TextField","label":"Street and number","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"town","component":"Row","children":["postcode","city"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"postcode","component":"TextField","label":"Postcode","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"city","component":"TextField","label":"City","value":""}]}}
                 {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"phone","component":"TextField","label":"Phone, for the courier","value":""}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"billing","component":"Row","justify":"spaceBetween","align":"center","children":["billing_label","billing_switch"]},{"id":"billing_label","component":"Text","text":"Same address for billing"},{"id":"billing_switch","component":"LayerToggle","label":"Same address for billing","value":true}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"next","component":"Button","child":"next_label","variant":"primary","action":{"event":{"name":"continueToPayment"}}},{"id":"next_label","component":"Text","text":"Continue to payment"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"billing","component":"Row","justify":"spaceBetween","align":"center","children":["billing_label","billing_switch"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"billing_label","component":"Text","text":"Same address for billing"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"billing_switch","component":"LayerToggle","label":"Same address for billing","value":true}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"next","component":"Button","child":"next_label","variant":"primary","action":{"event":{"name":"continueToPayment"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"next_label","component":"Text","text":"Continue to payment"}]}}
                 """
         ),
         ScreenPrompt.Example(
@@ -180,8 +230,13 @@ import Testing
             keywords: ["empty", "no ", "nothing", "onboarding", "welcome", "intro", "get started", "permission", "success", "done"],
             lines: """
                 {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["message","browse"]},{"id":"message","component":"Column","children":["tray","heading","explanation"]},{"id":"tray","component":"LayerSymbol","name":"tray"},{"id":"heading","component":"Text","text":"## No orders yet"},{"id":"explanation","component":"Text","text":"When you buy something, it shows up here with its tracking."}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"browse","component":"Button","child":"browse_label","variant":"primary","action":{"event":{"name":"browseTheShop"}}},{"id":"browse_label","component":"Text","text":"Browse the shop"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["message","browse"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"message","component":"Column","children":["tray","heading","explanation"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"tray","component":"LayerSymbol","name":"tray"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"heading","component":"Text","text":"## No orders yet"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"explanation","component":"Text","text":"When you buy something, it shows up here with its tracking."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"browse","component":"Button","child":"browse_label","variant":"primary","action":{"event":{"name":"browseTheShop"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"browse_label","component":"Text","text":"Browse the shop"}]}}
                 """
         ),
         ScreenPrompt.Example(
@@ -189,10 +244,20 @@ import Testing
             keywords: ["sign in", "sign-in", "log in", "login", "sign up", "sign-up", "register", "password", "account"],
             lines: """
                 {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["intro","fields","links"]},{"id":"intro","component":"Column","children":["heading","subtitle"]},{"id":"heading","component":"Text","text":"## Sign in to Fieldnote"},{"id":"subtitle","component":"Text","text":"Pick up your notes where you left them."}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"fields","component":"Column","children":["email","password","sign_in"]},{"id":"email","component":"TextField","label":"Email","value":""},{"id":"password","component":"TextField","label":"Password","value":""}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"sign_in","component":"Button","child":"sign_in_label","variant":"primary","action":{"event":{"name":"signIn"}}},{"id":"sign_in_label","component":"Text","text":"Sign in"}]}}
-                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"links","component":"Row","justify":"spaceBetween","children":["forgot","create"]},{"id":"forgot","component":"Button","child":"forgot_label","variant":"borderless","action":{"event":{"name":"resetPassword"}}},{"id":"forgot_label","component":"Text","text":"Forgot password?"},{"id":"create","component":"Button","child":"create_label","variant":"borderless","action":{"event":{"name":"createAccount"}}},{"id":"create_label","component":"Text","text":"Create account"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["intro","fields","links"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"intro","component":"Column","children":["heading","subtitle"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"heading","component":"Text","text":"## Sign in to Fieldnote"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"subtitle","component":"Text","text":"Pick up your notes where you left them."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"fields","component":"Column","children":["email","password","sign_in"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"email","component":"TextField","label":"Email","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"password","component":"TextField","label":"Password","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"sign_in","component":"Button","child":"sign_in_label","variant":"primary","action":{"event":{"name":"signIn"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"sign_in_label","component":"Text","text":"Sign in"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"links","component":"Row","justify":"spaceBetween","children":["forgot","create"]}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"forgot","component":"Button","child":"forgot_label","variant":"borderless","action":{"event":{"name":"resetPassword"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"forgot_label","component":"Text","text":"Forgot password?"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"create","component":"Button","child":"create_label","variant":"borderless","action":{"event":{"name":"createAccount"}}}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"create_label","component":"Text","text":"Create account"}]}}
                 """
         ),
     ]
@@ -301,22 +366,21 @@ import Testing
         The first line creates the screen's surface:
         {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
 
-        Each line after it is an updateComponents message that adds the next part of the screen, from top to bottom:
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[…]}}
-        The first holds the root: a Column with the id root, whose children are the ids of the screen's sections, in order. Each one after it adds the next section: the component the root names, and what it holds.
+        Each line after it is an updateComponents message holding one component, the next part of the screen, from top to bottom:
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"…","component":"…",…}]}}
+        The first holds the root: a Column with the id root, whose children are the ids of the screen's sections, in order. Then each section the root names, each followed by what it holds, a line for each component. Every id a component names has a line of its own. A line closes its own component and the message, nothing more: it never adds ]} to close the Column or Row it is in, even for the last thing that Column or Row holds.
 
-        Every component has an id, its own on the screen, and a component. Use only these:
+        Every component has an id and a component. An id says what its component is, in words joined by underscores, such as total_label or pace_value, and no two components share one. Use only these:
         - Column: children, a list of ids, from top to bottom.
         - Row: children, side by side. align center lines them up; justify spaceBetween puts them at both ends.
         - Card: child, the id of one component, usually a Column.
         - LayerGrid: children, filled row by row, and columns, a whole number from 1 to 12, which is required.
         - Text: text. "# " or "## " before the words makes the screen's heading; variant caption is for small print.
         - Image: url "" and a description of what it shows; variant avatar for a person.
-        - Icon: name, one of A2UI's icon names, such as search, settings or favorite.
-        - LayerSymbol: name, an SF Symbol name, such as bell or gearshape.
+        - LayerSymbol: name, an SF Symbol name, such as bell, gearshape or chevron.right. Every icon is one.
         - Button: child, the id of a Text with its words; variant primary, default or borderless; and action.
         - TextField: label, saying what goes in it, and value "".
-        - CheckBox, LayerToggle and LayerRadio: label, and value true or false.
+        - CheckBox, LayerToggle and LayerRadio: label, always, even beside a Text that says the same, and value true or false.
         - LayerProgress: value, from 0 to 1.
         - Divider.
 
@@ -325,21 +389,46 @@ import Testing
         Examples of the form, one screen each. Write your own content; don't copy them:
 
         {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","alerts","turn_off"]},{"id":"heading","component":"Text","text":"## Notifications"}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"alerts","component":"Column","children":["push","summary","mentions","divider","quiet"]},{"id":"push","component":"Row","justify":"spaceBetween","align":"center","children":["push_label","push_switch"]},{"id":"push_label","component":"Text","text":"Push notifications"},{"id":"push_switch","component":"LayerToggle","label":"Push notifications","value":true}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary","component":"Row","justify":"spaceBetween","align":"center","children":["summary_label","summary_switch"]},{"id":"summary_label","component":"Text","text":"Daily summary"},{"id":"summary_switch","component":"LayerToggle","label":"Daily summary","value":false}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions","component":"Row","justify":"spaceBetween","align":"center","children":["mentions_label","mentions_switch"]},{"id":"mentions_label","component":"Text","text":"Mentions only"},{"id":"mentions_switch","component":"LayerToggle","label":"Mentions only","value":true}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"divider","component":"Divider"},{"id":"quiet","component":"Row","justify":"spaceBetween","align":"center","children":["quiet_label","quiet_hours"]},{"id":"quiet_label","component":"Text","text":"Quiet hours"},{"id":"quiet_hours","component":"Text","text":"22:00 – 07:00","variant":"caption"}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"turn_off","component":"Button","child":"turn_off_label","variant":"borderless","action":{"event":{"name":"turnOffAllNotifications"}}},{"id":"turn_off_label","component":"Text","text":"Turn off all notifications"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","alerts","turn_off"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"heading","component":"Text","text":"## Notifications"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"alerts","component":"Column","children":["push","summary","mentions","divider","quiet"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"push","component":"Row","justify":"spaceBetween","align":"center","children":["push_label","push_switch"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"push_label","component":"Text","text":"Push notifications"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"push_switch","component":"LayerToggle","label":"Push notifications","value":true}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary","component":"Row","justify":"spaceBetween","align":"center","children":["summary_label","summary_switch"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary_label","component":"Text","text":"Daily summary"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary_switch","component":"LayerToggle","label":"Daily summary","value":false}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions","component":"Row","justify":"spaceBetween","align":"center","children":["mentions_label","mentions_switch"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions_label","component":"Text","text":"Mentions only"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions_switch","component":"LayerToggle","label":"Mentions only","value":true}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"divider","component":"Divider"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"quiet","component":"Row","justify":"spaceBetween","align":"center","children":["quiet_label","quiet_hours"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"quiet_label","component":"Text","text":"Quiet hours"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"quiet_hours","component":"Text","text":"22:00 – 07:00","variant":"caption"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"turn_off","component":"Button","child":"turn_off_label","variant":"borderless","action":{"event":{"name":"turnOffAllNotifications"}}}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"turn_off_label","component":"Text","text":"Turn off all notifications"}]}}
 
         ---
 
         {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["photo","about","details","actions"]},{"id":"photo","component":"Image","url":"","description":"A black cast-iron skillet"}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"about","component":"Column","children":["name","summary"]},{"id":"name","component":"Text","text":"## Cast-iron skillet, 26 cm"},{"id":"summary","component":"Text","text":"Pre-seasoned and oven-safe. Ships in two days."}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"details","component":"Card","child":"details_rows"},{"id":"details_rows","component":"Column","children":["size","colour"]},{"id":"size","component":"Row","justify":"spaceBetween","align":"center","children":["size_label","size_value"]},{"id":"size_label","component":"Text","text":"Size"},{"id":"size_value","component":"Text","text":"26 cm"}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour","component":"Row","justify":"spaceBetween","align":"center","children":["colour_label","colour_value"]},{"id":"colour_label","component":"Text","text":"Colour"},{"id":"colour_value","component":"Text","text":"Black"}]}}
-        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"actions","component":"Column","children":["add","save"]},{"id":"add","component":"Button","child":"add_label","variant":"primary","action":{"event":{"name":"addToBag"}}},{"id":"add_label","component":"Text","text":"Add to bag"},{"id":"save","component":"Button","child":"save_label","variant":"borderless","action":{"event":{"name":"saveForLater"}}},{"id":"save_label","component":"Text","text":"Save for later"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["photo","about","details","actions"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"photo","component":"Image","url":"","description":"A black cast-iron skillet"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"about","component":"Column","children":["name","summary"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"name","component":"Text","text":"## Cast-iron skillet, 26 cm"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary","component":"Text","text":"Pre-seasoned and oven-safe. Ships in two days."}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"details","component":"Card","child":"details_rows"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"details_rows","component":"Column","children":["size","colour"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"size","component":"Row","justify":"spaceBetween","align":"center","children":["size_label","size_value"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"size_label","component":"Text","text":"Size"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"size_value","component":"Text","text":"26 cm"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour","component":"Row","justify":"spaceBetween","align":"center","children":["colour_label","colour_value"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour_label","component":"Text","text":"Colour"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour_value","component":"Text","text":"Black"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"actions","component":"Column","children":["add","save"]}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"add","component":"Button","child":"add_label","variant":"primary","action":{"event":{"name":"addToBag"}}}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"add_label","component":"Text","text":"Add to bag"}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"save","component":"Button","child":"save_label","variant":"borderless","action":{"event":{"name":"saveForLater"}}}]}}
+        {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"save_label","component":"Text","text":"Save for later"}]}}
 
         What makes a screen good:
         - Give it one job and build it around that. Its heading names the job in plain words.
@@ -350,6 +439,6 @@ import Testing
         - Leave colour, size and spacing to the design: write none of them, and no @metadata.
         - Make hierarchy with the heading and variant caption, not colour: one heading, Text for whatever explains, variant caption for small print.
         - Group into sections, each a Column, Row, Card or LayerGrid in the root: a form's fields together, a list's rows together. Two to four sections.
-        - Use 5 to 14 components that show something, such as Text, Image, Button and TextField. Fewer, better elements beat a crowded screen.
+        - Show 5 to 14 things, such as Text, Image, Button and TextField; the Columns, Rows and Cards that hold them don't count. Fewer, better things beat a crowded screen.
         """
 }

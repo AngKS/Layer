@@ -18,13 +18,15 @@ import Foundation
         case "hosted" where arguments.count >= 3:
             guard let format = Format(rawValue: arguments[2]) else { usage() }
             await hosted(model: arguments[1], format: format, runs: runs(arguments.dropFirst(3).first))
+        case "rescore" where arguments.count >= 2:
+            rescore(log: arguments[1])
         default:
             usage()
         }
     }
 
     private static func usage() -> Never {
-        print("usage: run.sh check | outline [runs] | hosted <LM Studio model id> <outline|a2ui|both> [runs]")
+        print("usage: run.sh check | outline [runs] | hosted <LM Studio model id> <outline|a2ui|both> [runs] | rescore <log>")
         exit(2)
     }
 
@@ -65,6 +67,39 @@ import Foundation
         return ok
     }
 
+    // MARK: Scoring again
+
+    /// Scores again, with today's readers, every A2UI answer a `hosted` run printed to `log`: the text between a
+    /// "=== … a2ui · <brief>" line and its "--- valid=" line. An answer that ended in ERR has no such line and isn't
+    /// scored. No model runs. Each answer's new score is printed, then how many are valid now and how many were then.
+    private static func rescore(log path: String) {
+        guard let log = try? String(contentsOfFile: path, encoding: .utf8) else {
+            print("ERR can't read \(path)")
+            exit(1)
+        }
+        var summary = Summary(label: "rescore a2ui")
+        var validThen = 0
+        var answer: [String]?
+        for line in log.components(separatedBy: "\n") {
+            if line.hasPrefix("=== ") {
+                // Every header ends the answer before it: one that printed ERR has no "--- valid=" line, and an outline
+                // answer after it mustn't be read as part of it.
+                answer = line.contains(" a2ui · ") ? [] : nil
+                if answer != nil { print(line) }
+            } else if line.hasPrefix("--- valid="), let text = answer {
+                if line.hasPrefix("--- valid=1") { validThen += 1 }
+                let score = Score.a2ui(text.joined(separator: "\n"))
+                print("then \(line.prefix(11)) now \(score.line)\n")
+                summary.scores.append(score)
+                answer = nil
+            } else if answer != nil {
+                answer?.append(line)
+            }
+        }
+        print(summary.line)
+        print("rescore: valid now \(summary.valid)/\(summary.screens), then \(validThen)/\(summary.screens)")
+    }
+
     // MARK: Models
 
     /// The on-device model, as the app asks it (`ScreenGenerator`): the compact outline prompt, the description as
@@ -90,7 +125,8 @@ import Foundation
     }
 
     /// A model LM Studio serves on this Mac, through `HostedModelClient`, with no key: the full prompt in `format`,
-    /// sent as the app sends it (`HostedLanguageModel`), the instructions as the system prompt.
+    /// sent as the app sends it (`HostedLanguageModel`), the instructions as the system prompt, and A2UI at its own
+    /// temperature (`A2UIPrompt.temperature`), as `ScreenGenerator` asks for it.
     private static func hosted(model: String, format: Format, runs: Int) async {
         var summary = Summary(label: "LM Studio \(model) \(format.rawValue)")
         for brief in Briefs.all {
@@ -134,7 +170,8 @@ import Foundation
             var text = ""
             var tokens: Int?
             for try await event in HostedModelClient.stream(
-                conversation, schema: nil, maximumTokens: nil, temperature: nil, provider: .lmStudio, model: model, key: nil
+                conversation, schema: nil, maximumTokens: nil, temperature: format == .a2ui ? A2UIPrompt.temperature : nil,
+                provider: .lmStudio, model: model, key: nil
             ) {
                 switch event {
                 case .text(let more):
@@ -151,7 +188,8 @@ import Foundation
     }
 
     /// Runs one answer through the app's stream reader as it arrives, timing the first screen handed on (what the
-    /// canvas first shows) and the end, then scores the whole answer. `answer` hands each answer-so-far to `take` and
+    /// canvas first shows), when the answer itself began (after any reasoning) and the end, then scores the whole
+    /// answer. `answer` hands each answer-so-far to `take` and
     /// returns the output tokens, when the model says.
     private static func measure(
         _ brief: String, _ format: Format, into summary: inout Summary,
@@ -162,16 +200,19 @@ import Foundation
         var reader = ScreenReader(format, tokens: .standard)
         var text = ""
         var firstContent: Duration?
+        var answerStart: Duration?
         var completion = Duration.zero
         do {
             let tokens = try await answer { soFar in
                 text = soFar
+                if answerStart == nil, !soFar.isEmpty { answerStart = clock.now - start }
                 if reader.take(soFar, isComplete: false) != nil, firstContent == nil { firstContent = clock.now - start }
             }
             if reader.take(text, isComplete: true) != nil, firstContent == nil { firstContent = clock.now - start }
             completion = clock.now - start
             summary.completion.append(completion)
             if let firstContent { summary.firstContent.append(firstContent) }
+            if let answerStart { summary.answerStart.append(answerStart) }
             if let tokens { summary.outputTokens.append(tokens) }
         } catch {
             print("=== \(summary.label) · \(brief)\nERR \(error)\n")
@@ -180,6 +221,7 @@ import Foundation
         }
         let score = format == .outline ? Score.outline(text) : Score.a2ui(text)
         let timing = "firstContent=\(firstContent.map { "\(Int(($0 / .milliseconds(1)).rounded()))" } ?? "-")ms completion=\(Int((completion / .milliseconds(1)).rounded()))ms"
+            + " answerStart=\(answerStart.map { "\(Int(($0 / .milliseconds(1)).rounded()))" } ?? "-")ms"
         print("=== \(summary.label) · \(brief)\n\(text)\n\(score.line) \(timing)\n")
         summary.scores.append(score)
     }

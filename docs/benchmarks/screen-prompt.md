@@ -275,3 +275,132 @@ outline's was 27910 ms and is 43459 ms, with more output tokens a screen (3197 a
 Both formats ran past the full rules' 14 elements on some screens, as in the smoke run: 14 of the outline's 24 and 4 of
 A2UI's. The outline's 5 split sections are in 4 screens; the two looked at are running profiles whose figures are a grid
 that starts a section, with a row of labels straight after it, which the parser keeps apart (round 2, above).
+
+## Hosted A2UI reliability (2026-11-26)
+
+Branch `fu/a2ui` from main 8d92b8d, on the same Mac (macOS 27.2, Apple M4 Max), LM Studio serving
+`google/gemma-4-26b-a4b` (MLX, 4-bit), which samples at its own temperature 1.0, top-p 0.95 and top-k 64 unless asked
+otherwise. Each timed run had the MEASURING file to itself (other lanes start no build and no model call while it
+exists), began at a 1-minute load under 20 after one short request loaded the model, and printed every answer
+(`.superpowers/sdd/2026-11-26-followups/task-C-raw/`). The harness now also prints when each answer begins after the
+model's reasoning (`answerStart`), and `run.sh rescore <log>` scores a run's A2UI answers again with today's reader.
+
+**Before** (8d92b8d, the prompts as plan 6 left them): `run.sh hosted google/gemma-4-26b-a4b a2ui 3` from 01:21:32 to
+01:55:52, load 7.51 at its start and 2.73 to 15.00 during it.
+
+| Per 24 screens | A2UI, before |
+|---|---|
+| Valid | 11 |
+| First content p50 / p95 ms | 69918 / 119416 |
+| Completion p50 / p95 ms | 78239 / 124331 |
+| Output tokens per screen, p50 (all) | 4512 (108750) |
+| Kinds / leaves per screen | 4.08 / 10.21 |
+
+**Why 13 weren't valid.**
+- 9 had lines that weren't JSON, 15 lines in all, and every one held several components (2 to 12): 102 of 117 such
+  lines were good, against 59 of 59 lines holding one. 9 ended `}]}]}}` where `}]}}` belonged, 5 wrote an id without its
+  colon (`{"id","meta_row",…}`, `{"id="signup_btn",…}`), 1 closed a component with `]`. Plan 3's smoke run shows the same:
+  its 3 broken lines held 3 components each.
+- 2 named an `Icon` with an SF Symbol name (`creditcard`; `droplet`, `figure`, `book`).
+- 1 gave two components one id in one message; 1 left three `LayerToggle`s without their required `label`.
+- None had a raw control character or a component nothing reached (plan 6 saw one of each).
+
+**What changed.**
+- The prompt asks for one component a message, and every example is written that way; for each section the root names,
+  its line, then what it holds. It offers one way to write an icon, `LayerSymbol` by its SF Symbol name, and says a
+  toggle, checkbox or radio always has its label. (Round 1.)
+- The reader, for a model's answer only: an `Icon` named outside A2UI's 59 names is the A2UI icon with the same letters
+  (`arrow_back`), else Layer's own symbol by that name, as an outline's `symbol:` line is; a raw control character inside a
+  string is escaped, the one mend, which changes no text; a component a later line writes again differently is said, as
+  two with one id in one message are. A2UI from a file is read as before. On the 24 answers above, the reader alone makes
+  13 valid (`rescore`).
+- A screen in A2UI is asked for at temperature 0.5 (`A2UIPrompt.temperature`), and LM Studio is now sent a temperature
+  when one is asked for; Magic Pen's requests still ask LM Studio for none (below). (Round 1, after one fixed run.)
+- The prompt asks for ids in words, each component's own, and counts only what shows, not the Columns and Rows that hold
+  it. (Round 3.)
+- The prompt says a line closes only its own component. (Round 4.)
+- Not used: LM Studio's `response_format` with a JSON schema. It streams and its answer is JSON by construction, but under
+  the schema gemma-4 didn't reason at all (0 reasoning tokens, against 1555 without it) and wrote nonsense: a root whose
+  children were ids such as `");tt_-id-1"` on a surface named `header-layer-1`.
+
+**The runs after.** Each `both` run is the 8 briefs three times in each format, the formats taking turns (A2UI first on
+the odd briefs), with the full prompts and the client as the app sends them; on-device `run.sh outline 1` ran straight
+after each in the same window. Reasoning tokens are from LM Studio's server log (the harness gets only the totals).
+Rounds 2 to 4 were each disturbed for a few minutes by another lane (see "The machine"), so only their valid counts and
+failures count; the times below are the final run's, which nothing else shared.
+
+| Run (commit) | When, load at start | A2UI valid | What failed |
+|---|---|---|---|
+| Round 1, `a2ui 1` (972ac09) | 02:30–02:38, 15.76 | 7 of 8 | a garbled copy of a line already written |
+| Round 1 at temperature 0.5, `a2ui 1` (cc14865) | 02:46–02:55, 15.63 | 8 of 8 | none (175 lines) |
+| Round 2, `both 3` (7b80e17) | 02:55–03:40, 8.75 | 18 of 24 | 3 broken lines in a screen; `s3`'s line broken twice; `}]}]}}` twice; two components named `name` and three `label` |
+| Round 3, `both 3` (063c9c0) | 03:48–04:39, 15.39 | 20 of 24 | `}]}]}}` four times, each on the line of the last thing a Column or Row holds |
+| Round 4, `both 3` (e73e18b) | 04:44–05:32, 17.69 | 20 of 24 | four different slips: a stray `\` before a key; a component written without its message; a Card given `children` for `child`; a message's middle replaced by a component's fields |
+| **Final**, `both 3` (be8d111) | 06:40–07:24, 1.72 | **20 of 24** | `}]}]}}` 7 times in 3 screens; `updateCompontents`; `"components":{` without its `[`; a Button whose child is a symbol |
+
+| Per 24 screens | Outline, final | A2UI, before | A2UI, final |
+|---|---|---|---|
+| Valid | **24** | 11 | **20** |
+| More than one filled button, before / after polish | 1 / 0 | 0 / 0 | 0 / 0 |
+| Coloured nodes | 1 | 0 | 0 |
+| Kinds / leaves per screen | 5.54 / 13.83 | 4.08 / 10.21 | 4.71 / 12.83 |
+| Rows / cards / grids per screen | 2.83 / 1.17 / 0.21 | 1.88 / 1.08 / 0.00 | 2.67 / 1.00 / 0.08 |
+| Split sections | 0 | 0 | 0 |
+| Copied example lines | 13 | 4 | 5 |
+| First content p50 / p95 ms | **40650** / 71746 | 69918 / 119416 | **51127** / 74399 |
+| Answer start p50 / p95 ms | 40561 / 71669 | – | 48840 / 72502 |
+| Completion p50 / p95 ms | 42447 / 74159 | 78239 / 124331 | 63654 / 92434 |
+| Output tokens per screen, p50 (all) | 3220 (81945) | 4512 (108750) | 4393 (104748) |
+| Reasoning tokens p50 | 3090 | 3937 | 3474 |
+
+"A2UI, before" is an `a2ui 3` run on its own, as the brief asked for the diagnosis; the final run is `both 3`, the two
+formats taking turns. So those two columns aren't like for like: the rule's comparison, of both formats in one run, is
+the one that counts.
+
+The outline was also 24 of 24 in rounds 2, 3 and 4, and the on-device outline 8 of 8 after each round and after the final
+run (first content p50 1071, 1066, 1106 and 1003 ms).
+
+**The rule** (My call 8, `HostedFormatRule`, unchanged): hosted models write A2UI unless it has fewer valid screens than
+the outline, or its first-content median is more than 25% above the outline's. The final run ended:
+
+```
+hosted default: outline — valid 20/24 vs 24/24; first content p50 51127 ms vs 40650 ms (+26%)
+```
+
+**The default stays the outline**, on both conditions. `ScreenGenerator.hostedFormat` is unchanged.
+
+**What's left.**
+- A2UI's lines that weren't messages went from 15 in 24 screens (all lines of several components) to 9 in 24 (570 lines,
+  24 a screen), and its failing screens from 13 to 4. Seven of the nine were `}]}]}}` on the line of the last thing a
+  Column or Row holds: the model closing that container as it would in nested JSON. Round 4's rule against it ("a line
+  closes its own component and the message, nothing more") had none in round 4 but seven here, so it doesn't hold.
+- A Button whose child is a symbol (a settings gear) is an icon button Layer reads as its symbol, with a diagnostic; it
+  failed one screen here, and one of round 4's had it too. The prompt says a Button's child is a Text.
+- First content: A2UI waits for the root, a section and its first component (about 2.3 s of answer), and the model thinks
+  12% longer before A2UI than before the outline (3474 against 3090 reasoning tokens), so A2UI's first content was 26%
+  later. A2UI's thinking was 3937 tokens before this work.
+- The mend not made: `}]}]}}` is a bracket pair that closes nothing and could be dropped deterministically. It is a change
+  to the JSON's structure, which this work ruled out. It would have made 1 more of the final run's screens valid (21 of
+  24), still under the outline's 24.
+- Constrained decoding would rule out every syntax slip, but LM Studio's schema answer is worthless with this model. A model
+  that keeps reasoning under a schema, or a provider that does, is the lever left for syntax.
+
+**The machine.** The final run had the machine and LM Studio to itself: load 1.72 to 5.12, and no request in LM Studio's
+log but its own. Rounds 2 to 4 began at a load under 20 with MEASURING in place but were each disturbed for a few
+minutes: round 2 by a load of 20 or more from 02:56:26 to 03:03:27 (up to 175.83) from another lane's two `xcodebuild
+test` runs (from 02:55:46, and from 02:57:49 to 03:01:37), round 3 by 77 of another lane's LM Studio requests from
+03:46:10 to 03:57:14, and round 4 by 19 of them from 04:44:50 to 04:48:38 and a load of 21 to 28 from 05:20:44 to
+05:23:14. The before run shared its first 75 seconds with another lane's on-device run.
+
+**Magic Pen on LM Studio, at temperature 0 and at its own (fix round 1).** Sending LM Studio the temperature asked for
+would also have changed Magic Pen: `HostedSketchInterpreter` asks for 0 in its two requests, and LM Studio had always
+been sent none. Its exact requests, captured from the app through the test provider (`decide` for three of the corpus's
+checkbox-or-image close calls, with its schema; `suggestTitle` for boards made of the settings, product and sign-in
+examples), were sent five times each at temperature 0 and with none, taking turns, from 07:36:18 to 07:37:45 (MEASURING
+held, load 16.41 at the start, nothing else in LM Studio's log). All 60 finished (`stop`), none near a limit. `decide`,
+under its schema, reasons not at all at either: 9 to 16 tokens, 0.1 to 0.5 s. `suggestTitle` reasons 211 to 410 tokens
+in 1.9 to 3.8 s at either, with no loop, and names each board sensibly (at 0, "Product Detail Page", "Notification
+Settings", "Sign In Screen", the same each time). But one `decide` got worse: the pill-shaped outline with an X that the
+corpus labels an image was read as a checkbox five times out of five at 0, against image four times out of five with no
+temperature; the other two were the same at both. So Magic Pen asks LM Studio for no temperature again, as before, and
+Anthropic still for 0 (`HostedSketchInterpreter.options`); only A2UI's request gets its temperature.

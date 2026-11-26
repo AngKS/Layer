@@ -192,6 +192,8 @@ struct Summary {
     /// Screens the model gave no answer for, with why.
     var errors: [String] = []
     var firstContent: [Duration] = []
+    /// When the answer itself began, after any reasoning: what first content is made of, beside the lines it waits for.
+    var answerStart: [Duration] = []
     var completion: [Duration] = []
     var outputTokens: [Int] = []
 
@@ -226,6 +228,7 @@ struct Summary {
             "copiedExampleLines=\(scores.map(\.copiedLines).reduce(0, +))",
             "firstContent p50=\(Self.milliseconds(firstContent, 0.5)) p95=\(Self.milliseconds(firstContent, 0.95)) ms",
             "completion p50=\(Self.milliseconds(completion, 0.5)) p95=\(Self.milliseconds(completion, 0.95)) ms",
+            "answerStart p50=\(Self.milliseconds(answerStart, 0.5)) p95=\(Self.milliseconds(answerStart, 0.95)) ms",
         ]
         if !outputTokens.isEmpty {
             parts.append("outputTokens total=\(outputTokens.reduce(0, +)) p50=\(Self.percentile(outputTokens, 0.5)) max=\(outputTokens.max() ?? 0)")

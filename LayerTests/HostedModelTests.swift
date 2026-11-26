@@ -167,6 +167,47 @@ final class HostedModelTests {
         #expect(StubProvider.requests.last?.headers["Authorization"] == "Bearer test-key-openai")
     }
 
+    /// A temperature asked for goes to Anthropic and to LM Studio, whose models all take one; never to OpenAI, whose
+    /// reasoning models refuse any but their own (2026-11-26: until then LM Studio was sent none either).
+    @Test(arguments: HostedProvider.allCases)
+    func aTemperatureGoesToEveryProviderButOpenAI(provider: HostedProvider) throws {
+        let request = try HostedModelClient.streamingRequest(
+            HostedConversation(messages: [.init(role: .user, text: "Hi")]), schema: nil, maximumTokens: nil, temperature: 0.5,
+            provider: provider, model: "m", key: "k")
+        let data = try #require(request.httpBody)
+        let body = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["temperature"] as? Double == (provider == .openAI ? nil : 0.5))
+        // None asked for, none sent.
+        let plain = try HostedModelClient.streamingRequest(
+            HostedConversation(messages: [.init(role: .user, text: "Hi")]), schema: nil, maximumTokens: nil, temperature: nil,
+            provider: provider, model: "m", key: "k")
+        let plainData = try #require(plain.httpBody)
+        let plainBody = try #require(try JSONSerialization.jsonObject(with: plainData) as? [String: Any])
+        #expect(plainBody["temperature"] == nil)
+    }
+
+    /// Magic Pen asks LM Studio for no temperature, as before 2026-11-26, and Anthropic for 0, as it always has: at
+    /// temperature 0 LM Studio's gemma-4 chose the same wrong reading of one close call five times out of five, where it
+    /// was right four times in five at its own (docs/benchmarks/screen-prompt.md).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"), arguments: [HostedProvider.lmStudio, .anthropic])
+    func magicPenAsksLMStudioForNoTemperature(provider: HostedProvider) async throws {
+        let interpreter = HostedSketchInterpreter(model: HostedLanguageModel(provider: provider, model: "m"))
+        let expected: Double? = provider == .lmStudio ? nil : 0
+
+        StubProvider.answer(with: .init(body: provider == .anthropic ? SSE.anthropic(text: ["Sign In"]) : SSE.openAI(text: ["Sign In"])))
+        _ = try await interpreter.suggestTitle(for: "The board has one screen.")
+        #expect(StubProvider.lastBody["temperature"] as? Double == expected)
+
+        let resources = try #require(Bundle(for: MagicPenBundleMarker.self).resourceURL)
+        let fixtures = try SketchFixtureCorpus.load(from: resources)
+        let request = try #require(fixtures.lazy.compactMap { $0.makeRequest() }.first { $0.options.count > 1 })
+        let names = request.options.map(SketchPrompt.name(for:))
+        let json = #"{"chosen":""# + names[0] + #""}"#
+        StubProvider.answer(with: .init(body: provider == .anthropic ? SSE.anthropic(text: [json], toolJSON: true) : SSE.openAI(text: [json])))
+        _ = try await interpreter.decide(request)
+        #expect(StubProvider.lastBody["temperature"] as? Double == expected)
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"), arguments: [HostedProvider.anthropic, .openAI])
     func aSchemaGivesAStructuredAnswer(provider: HostedProvider) async throws {
         let json = #"{"chosen": "button", "runnerUp": "textField"}"#
@@ -417,3 +458,6 @@ struct ModelChoiceTests {
         #expect(ModelChoice(provider: "someday-provider", model: "m").sketchProvider.id == SketchProvider.appleIntelligence.id)
     }
 }
+
+/// Finds the test bundle's resources, where the sketch corpus is.
+private final class MagicPenBundleMarker {}
