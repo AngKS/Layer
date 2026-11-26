@@ -619,7 +619,8 @@ changed. What it got wrong was how it called them. It gave the spacing as a bare
 "space the row out more" changed nothing. Its other misses were second calls. The wording now asks for every value as
 text and for one call a command. Hosted "right" went from **18 of 24 to 20 of 24**, and the spacing is read every time.
 One thing it didn't fix: told "more", the model sometimes raises the spacing again each time the canvas shows the last
-change (below). The on-device model is told and handed exactly what it was before, and scored the same.
+change (below). The on-device model is told and handed exactly what it was before, and scored the same. Fix round 1,
+at the end, scores where the design ends up as well, and keeps a seventh wording.
 
 **The hosted measurement.** `VoiceStructureLiveTests`, in `LayerTests/VoiceAgentLiveTests.swift`, puts the harness's
 eight structure cases to LM Studio's `google/gemma-4-26b-a4b` through the app's own hosted profile: the full rules, the
@@ -634,8 +635,9 @@ TEST_RUNNER_LAYER_LMSTUDIO=google/gemma-4-26b-a4b xcodebuild test \
 
 - The calls are carried out by the app's own toolbox on a design built as the harness's "Account" canvas is told, with
   the same handles and selection. A test checks that. The canvas is taken again after each tool, as a call does for a
-  hosted model. The captured canvas differs from the harness's in one look word: the toggle is "colour accent", not
-  "colour green".
+  hosted model. The captured canvas differs from the harness's in two places: the toggle is "colour accent", not
+  "colour green", and the label in the row is at y273, not y272, centred across the row. In these runs the screen
+  wasn't marked "[in view]" either, as the harness's is; fix round 1, below, puts it in view.
 - Each case runs three times, each on a fresh design in a fresh session.
 - It is scored as the harness scores: "right" is the right tool with the right arguments and no other call; "right
   tool" is a first call to the right tool. A call whose arguments can't be read counts as that tool picked, not right.
@@ -656,23 +658,33 @@ same mark; and round 2's `newtools`, started 2 minutes before the mark at 04:42:
 for the mark before every request they can see (`TEST_RUNNER_LAYER_QUIET_FILE`), and the scripts stop a run within
 10 s of a mark appearing.
 
-| Run | Start | Load (1, 5, 15 min) before |
-|---|---|---|
-| Before: `run.sh structure 5`, the on-device list | 02:05:29 | 521.30, 415.96, 207.04 |
-| Before: `run.sh structure 5 baseline --all-tools` | 02:08:37 | 197.20, 403.17, 252.37 |
-| Before: `run.sh newtools 5`, the on-device list | 02:12:49 | 103.69, 287.70, 243.83 |
-| Before: `VoiceAgentLiveTests` | 02:13:29 | 229.26, 296.11, 248.87 |
-| Before: `VoiceStructureLiveTests` | 02:39:00 | 4.53, 19.43, 87.18 |
-| Round 1: `VoiceStructureLiveTests` | 03:41:51 | 2.80, 3.16, 7.42 |
-| Round 2: `run.sh structure 5`, the on-device list | 03:42:16 | 39.83, 11.62, 10.34 |
-| Round 2: `run.sh structure 5 baseline --all-tools` | 03:45:56 | 144.29, 75.13, 37.01 |
-| Round 2: `run.sh newtools 5`, the on-device list | 04:40:39 | 146.04, 36.42, 16.23 |
-| Round 3: `VoiceStructureLiveTests` | 05:33:32 | 3.36, 4.63, 6.33 |
-| After: `run.sh structure 5`, the on-device list | 05:45:54 | 30.71, 66.56, 50.11 |
-| After: `run.sh structure 5 baseline --all-tools` | 05:55:55 | 20.84, 47.85, 51.49 |
-| Round 4 (after): `VoiceStructureLiveTests` | 05:56:00 | 19.33, 47.09, 51.20 |
-| After: `run.sh newtools 5`, the on-device list | 05:59:45 | 8.08, 30.09, 43.29 |
-| After: `VoiceAgentLiveTests` | 06:06:31 | 9.69, 51.44, 55.17 |
+Every run, kept or not. Runs left out aren't in the tables below.
+
+| Run | Start | Load (1, 5, 15 min) before | Kept? |
+|---|---|---|---|
+| `run.sh structure 5`, the on-device list | 01:21:17 | 8.49, 8.48, 6.89 | Left out: stopped at 01:22:46 for another lane's timed run |
+| `run.sh` with "structure 5" as one argument, which ran the default commands | 01:58:05 | 2.45, 3.70, 5.54 | Only its "Stack … into a column" row is cited |
+| `VoiceStructureLiveTests`, its first scoring, answered by a recorder | 02:00:26 | 78.49, 32.46, 16.56 | Left out: an unreadable call was scored as no call, and the canvas never changed |
+| Before: `run.sh structure 5`, the on-device list | 02:05:29 | 521.30, 415.96, 207.04 | Yes |
+| `VoiceStructureLiveTests`, answered by a recorder | 02:08:32 | 213.93, 409.90, 253.83 | Left out: the canvas never changed (below) |
+| Before: `run.sh structure 5 baseline --all-tools` | 02:08:37 | 197.20, 403.17, 252.37 | Yes |
+| Before: `run.sh newtools 5`, the on-device list | 02:12:49 | 103.69, 287.70, 243.83 | Yes |
+| Before: `VoiceAgentLiveTests` | 02:13:29 | 229.26, 296.11, 248.87 | Yes |
+| Round 1: `VoiceStructureLiveTests`, answered by a recorder | 02:17:33 | 64.05, 163.70, 202.17 | Left out: the canvas never changed |
+| Before: `VoiceStructureLiveTests` | 02:39:00 | 4.53, 19.43, 87.18 | Yes |
+| Round 1: `VoiceStructureLiveTests` | 03:41:51 | 2.80, 3.16, 7.42 | Yes |
+| Round 2: `run.sh structure 5`, the on-device list | 03:42:16 | 39.83, 11.62, 10.34 | Yes |
+| Round 2: `run.sh structure 5 baseline --all-tools` | 03:45:56 | 144.29, 75.13, 37.01 | Yes |
+| Round 2: `VoiceStructureLiveTests` | 04:40:10 | 3.19, 3.63, 4.48 | Left out: stopped at 04:48:40, 11 of 27 runs done |
+| Round 2: `run.sh newtools 5`, the on-device list | 04:40:39 | 146.04, 36.42, 16.23 | Yes |
+| Round 3: `VoiceStructureLiveTests` | 05:33:32 | 3.36, 4.63, 6.33 | Yes |
+| After: `run.sh structure 5`, the on-device list | 05:45:54 | 30.71, 66.56, 50.11 | Yes |
+| Round 4: `VoiceStructureLiveTests`, first try | 05:46:08 | Not recorded: the retry wrote over it | Left out: stopped at 05:52:30, 20 of 27 runs done |
+| After: `run.sh structure 5 baseline --all-tools`, first try | 05:48:24 | Not recorded: the retry wrote over it | Left out: stopped at 05:52:24 |
+| After: `run.sh structure 5 baseline --all-tools` | 05:55:55 | 20.84, 47.85, 51.49 | Yes |
+| Round 4 (after): `VoiceStructureLiveTests` | 05:56:00 | 19.33, 47.09, 51.20 | Yes |
+| After: `run.sh newtools 5`, the on-device list | 05:59:45 | 8.08, 30.09, 43.29 | Yes |
+| After: `VoiceAgentLiveTests` | 06:06:31 | 9.69, 51.44, 55.17 | Yes |
 
 **The rounds.** Rounds 1, 3 and 4 changed only what a hosted model is told, so the on-device runs were made for round
 2 and for the wording kept, not for each. The on-device model answers greedily.
@@ -718,14 +730,35 @@ and the spacing 0 of 2.
   spacing the canvas now shows: 24, 40, 60, … up to 800. The runs that did this set it 7, 12 and 15 times in round 1;
   15 and 4 times in round 3, beside one that stopped at 24; 5 times in round 4, beside two that stopped at 24. A command is one
   step to undo, so one "undo" takes it all back.
-- **Taking the toggle out.** Each miss is a second call after a first the app turned down. Before, the first left x
-  and y out once, and once gave the toggle's own spot. In round 3 the model gave its own spot once, and once put x and
-  y in takeOut itself, "yes x112 y305", which the app doesn't read as a place; in round 4 it did that twice.
+- **Taking the toggle out.** The score hides a change here. Before, both misses were a second call after a first the
+  app turned down: one left x and y out, one gave the toggle's own spot. Both second calls took the toggle out, so
+  every run ended with it out. In round 3 one miss was like those, but in the other the model put x and y inside
+  takeOut, "yes x112 y305": five calls, all turned down, the toggle left in the row, and "Done". In round 4, the wording
+  kept, it put them inside takeOut in both misses. One recovered on its second call; the other made **21 calls**, all
+  turned down, and said "Done" with the toggle still in the row. This first appears in round 3, the round that added
+  "give it everything in one call" to the rules. Round 4's `takeOut "yes" and an x and a y of their own` didn't remove
+  it. Fix round 1, below, aims at it.
 - **"Put these in a column"**, before and in round 1: after grouping the two fields, the model grouped everything on
   the screen, the new column too, then asked which elements were meant. From round 3, not once.
 - **The grid**, once in round 4: `layout: grid`, with no count, which the app makes a grid of 1.
 - **"Stack … into a column"** made a column with `groupElements` every time, before any change too. On the
   on-device model the same words went to `stackElements` (2026-11-26, 01:58).
+
+Round 2 on the on-device model, per case:
+
+| Command | Round 2, on-device list | Round 2, all tools |
+|---|---|---|
+| "Put these in a column" | 0 of 5: `stackElements` E8, E9 | **5 of 5** |
+| "Make these a row" | 0 of 5: `groupElements` E6, E7 as row (right tool) | 0 of 5: `groupElements` E6, E7 as row (right tool) |
+| "Make the card a grid of two" | 0 of 5: `groupElements` E2 as grid | 0 of 5: `groupElements` E3, E4 as grid of two |
+| "Space the row out more" | 0 of 5: `tidyScreen` | **5 of 5** |
+| "Ungroup the row" | **5 of 5** | **5 of 5** |
+| "Move the toggle before the label" | 0 of 5: `placeElement` | 0 of 5: `placeElement` |
+| Control: "Take the toggle out of the row" | 0 of 5: `ungroup` | 0 of 5: `ungroup` |
+| Control: "Make the button half width" | **5 of 5** | **5 of 5** |
+| **Total** | **10 of 40** (right tool 15) | **20 of 40** (right tool 25) |
+
+Its `newtools` run gave every call the same as before.
 
 **Why round 2's descriptions weren't kept.** They added 87 tokens to the on-device profile, 3,377 with one screen, and
 won it nothing: still 10 of 40 on the structure cases. "Make these a row" moved to `groupElements` but named the row's
@@ -762,12 +795,147 @@ With all 25 tools it is 3,635, up from 3,590, from `setLayout`'s longer descript
 **The live tests.** `VoiceAgentLiveTests` passed 9 of 9 before and after. After: "Put the two texts at the bottom in a
 row" called `groupElements` once, and "Move the toggle before the label" called `reorder` once.
 
-**What it led to.** The full rules and `setLayout`'s description keep rounds 1, 3 and 4's wording. Another round wasn't
-run: with three runs a case, a case moves by one either way between rounds with nothing changed for it. "Put these in
-a column" went 2, 2, 3, 3 and "take the toggle out" 1, 3, 1, 1. The one miss left that matters, "more" made again and
-again, held through three wordings, so it likely needs the app itself to stop it. Two ways it could:
+**What it led to, at first.** I stopped after round 4 and called the moves that were left noise. That was wrong for
+take-out: its new failure has a cause in the wording (above), and the scores couldn't see a run that ended in "Done"
+with nothing done. Three runs a case do let a case move by one between rounds: "put these in a column" went 2, 2, 3,
+3. "More" set again and again held through three wordings, so it may need the app itself to stop it:
 - refuse a second change to the same thing in one command;
 - not tell a hosted model the canvas again after a tool for a command that says "more".
+
+### Fix round 1 (2026-11-26)
+
+A review found what the scores above can't see. In round 4, the wording first kept, one take-out run made 21 calls the
+app turned down and said "Done" with the toggle still in the row. The review also found that the "once" rule had only
+been tried on commands that never need a tool twice. So this round changed how the hosted cases are scored, added three
+live commands, and ran three more rounds of wording. Only what a hosted model is told changed. The on-device profile is
+the same, byte for byte.
+
+**What changed in the measurement.**
+- **Where the design ends up.** `VoiceStructureLiveTests` now also checks it, case by case. "Right" is now the
+  harness's right with the design where the command asked. A run that ends in "Done" with nothing done is counted as
+  "said done, not done". Spacing counts as done from 13 to 48: one step more, not a spacing raised again and again.
+- **In view.** The screen is now in view, marked "[in view]" as the harness's is. A test that runs in CI,
+  `VoiceStructureDesignTests`, compares the whole canvas text with the harness's. The only differences it allows are
+  the toggle's colour and the label's y.
+- **Three live commands** that need a tool more than once, judged by where the design ends up: "Undo the last two
+  changes", "Add three buttons", and "Rotate it 45 degrees, then 45 more", said with the button selected.
+- **More runs of one case.** `TEST_RUNNER_LAYER_STRUCTURE_RUNS` and `_ONLY` run chosen cases ten times.
+- Round 4 was measured again this way. The numbers below aren't comparable with the earlier rounds' for that reason.
+
+**The rounds.** Each is a change to the full rules or `setLayout`, on top of round 4.
+
+5. Takes out "Never call the same tool on the same element twice… give it everything in one call". In its place: "make
+   that change once", a command for several things is "a call for each", and "If a tool's reply says it couldn't be
+   done, fix what the reply names and call it again". The take-out sentence becomes: takeOut "yes", "and x and y as
+   values of their own, never written into takeOut". `setLayout`'s layout guide adds "always said" to the grid's number.
+6. Round 5's take-out sentence and "a call for each", with round 4's brake back: "Never call the same tool on the same
+   element twice in one command, unless its reply said it couldn't be done." The guide is as before. `setLayout`'s
+   description gains "For "a grid of two", the layout is "grid of 2": a grid always says how many columns."
+7. **Kept.** Round 6, plus "'45 more' is rotateElement with by 45, from where it is." beside the full rules' line on
+   turning. The on-device rules keep their own line.
+
+**What was run.** The 1-minute load was 1.64 to 84.47 at the starts. Another lane built and ran LM Studio alongside,
+untimed. MEASURING appeared twice, at 07:34:45 and 07:47:07. Each time the round 4 structure run was stopped and started
+again. A third try, started 07:49:23, was stopped at 07:53 to change how the suite waits: from then on it pauses inside,
+before each request, while MEASURING exists, and it paused for about 3 minutes in the run at 07:54:57. LM Studio crashed
+at about 08:19 ("The model has crashed", then "Model is unloaded") during round 5's live tests. The 4 tests it hit were
+run again and are counted from that rerun.
+
+| Run | Start | Load (1, 5, 15 min) before |
+|---|---|---|
+| Round 4: `VoiceStructureLiveTests`, tries stopped for MEASURING | 07:33:52, 07:37:45 | 5.84, 21.92, 17.39 for the second; the first not recorded |
+| Round 4: `VoiceStructureLiveTests`, third try, stopped at 07:53 | 07:49:23 | not recorded |
+| Round 4: `VoiceStructureLiveTests` | 07:54:57 | 22.26, 32.40, 38.88 |
+| Round 4: `VoiceAgentLiveTests`, 12 | 08:03:47 | 4.19, 14.48, 27.15 |
+| Round 5: `VoiceStructureLiveTests` | 08:08:15 | 3.34, 12.10, 23.32 |
+| Round 5: `VoiceAgentLiveTests`, 12 | 08:17:45 | 4.04, 7.22, 16.13 |
+| Round 5: the 4 live tests the crash hit, again | 08:21:22 | 6.21, 12.28, 16.99 |
+| Round 6: `VoiceStructureLiveTests` | 08:23:30 | 11.38, 15.18, 17.74 |
+| Round 6: `VoiceAgentLiveTests`, 12 | 08:28:40 | 4.47, 13.17, 17.01 |
+| Round 6: take-out, 10 runs | 08:31:57 | 4.34, 11.77, 15.94 |
+| Round 6: spacing, 10 runs | 08:34:43 | 6.51, 13.23, 16.16 |
+| Round 6: the new screen once, the turn three times | 08:44:34 | 1.64, 6.11, 12.18 |
+| Round 4: take-out, 10 runs | 08:48:40 | 28.67, 29.73, 22.21 |
+| Round 4: spacing, 10 runs | 08:50:56 | 14.43, 29.13, 23.56 |
+| Round 4: the turn, 4 times | 08:52:56 | 12.80, 26.51, 23.47 |
+| The wording before this task (8d92b8d): the turn, 4 times | 08:58:40 | 8.05, 29.69, 28.11 |
+| Round 7: the turn, 4 times | 09:02:57 | 46.84, 54.26, 40.44 |
+| Round 7: `VoiceStructureLiveTests` | 09:05:06 | 84.47, 68.92, 48.38 |
+| Round 7: `VoiceAgentLiveTests`, 12 | 09:10:16 | 4.83, 33.76, 39.36 |
+| Round 7: take-out, 10 runs | 09:13:42 | 6.61, 25.96, 35.39 |
+| Round 7: spacing, 10 runs | 09:16:17 | 17.35, 31.20, 36.72 |
+| Round 7: `run.sh structure 1`, the on-device list | 09:20:36 | 4.08, 19.21, 30.44 |
+| Round 7: spacing, 10 more runs | 09:26:30 | 11.39, 21.98, 28.50 |
+| Round 4: spacing, 10 more runs | 09:30:48 | 3.55, 14.04, 23.61 |
+
+**The eight cases, 3 runs each.** Each cell is right, then done, of 3. Right tool was 3 of 3 in every cell.
+
+| Command | Round 4 | Round 5 | Round 6 | Round 7, kept |
+|---|---|---|---|---|
+| "Put these in a column" | 3, 3 | 3, 3 | 2, 3 | 3, 3 |
+| "Make these a row" | 3, 3 | 2, 3 | 3, 3 | 3, 3 |
+| "Make the card a grid of two" | 1, **2** | 2, **2** | 3, 3 | 3, 3 |
+| "Space the row out more" | 3, 3 | 1, **1** | 3, 3 | 2, **2** |
+| "Ungroup the row" | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| "Move the toggle before the label" | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| Control: "Take the toggle out of the row" | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| Control: "Make the button half width" | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| **Right** | **22 of 24** | **20** | **23** | **23** |
+| **Said done, not done** | 1 | 3 | 0 | 1 |
+| Apart: "Stack … into a column" (done) | 0 (3) | 1 (3) | 0 (3) | 0 (3) |
+
+Where right and done differ, the model made a second call; done counts the design however it got there. The misses:
+- **The grid.** In round 4 and round 5, `layout: grid` with no count, which the app makes a grid of 1. In round 5 one
+  run went on to group and ungroup the card's contents in 6 calls and ended a grid of 1. None in rounds 6 and 7, after
+  the description's example.
+- **The spacing.** Raised again and again: in round 5, to 180 and 120; in round 7, to 80.
+- **"Make these a row"** in round 5, and **"put these in a column"** in round 6: a second call after the group, a
+  resize, or a second group of everything. The design was still right.
+
+**More runs of the cases that moved.** Done, of the runs made. Where the spacing was raised again and again, the calls
+it took are in brackets.
+
+| Case | Round 4 | Round 6 | Round 7, kept |
+|---|---|---|---|
+| "Take the toggle out of the row", 10 runs | 10 | 10 | 10 |
+| "Space the row out more", first 10 runs | 8 (3 and 4 calls) | 7 (6, 6 and 10) | 7 (3, 4 and 4) |
+| "Space the row out more", 10 more runs | 8 (4 and 4) | not run | 7 (3, 4 and 10) |
+| "Space the row out more", with the 3 above: done | **19 of 23** | 10 of 13 | **16 of 23** |
+
+With the three runs above, round 4's take-out was done 13 of 13, and so was round 7's. The 21-call run of round 4's
+first measurement didn't come back in 13 runs, so it can't be pinned on round 4's wording or cleared of it. Round 7 says
+outright not to write x and y into takeOut.
+
+**The live tests.** All 12 passed on round 4 and on round 7, each at the first try. Round 5 passed all 12 once the 4
+tests the crash hit were run again. Round 6 failed 2. The new screen failed once with "Failed to parse generated
+content" while the screen was being written, and passed when run again. The turn failed in the 12 and in 1 of 3 runs
+after.
+
+The turn, run 4 more times on each wording (the turn's run in the 12 is counted in the last column):
+
+| Wording | Turned to 90° | All runs of the turn |
+|---|---|---|
+| Before this task (8d92b8d) | 2 of 4 | 2 of 4 |
+| Round 4 | 3 of 4 | 4 of 5 |
+| Round 6 | 2 of 3 | 2 of 4 |
+| Round 7, kept | **4 of 4** | **5 of 5** |
+
+The misses turned it to 45 twice, angle 45 and then angle 45 again. That happens before this task's wording too, so the
+"once" rule didn't cause it. Round 7's "45 more" line fixes it in these runs: each turned to 45, then by 45. "Undo the
+last two changes" undid two steps every time, and "Add three buttons" added three, on every wording. In round 5 the
+model also aligned each new button to the bottom.
+
+**The on-device model.** Rounds 5 to 7 changed only the full rules and `setLayout`, which it isn't handed. With round
+7's wording, `run.sh structure 1` printed the same profile, 3,290 tokens with one screen, and made the same calls as the
+first run before this task.
+
+**What it led to.** Round 7's wording is kept: 23 of 24 right, take-out done 13 of 13, the grid 3 of 3, and the turn 5
+of 5. All 12 live tests passed at the first try. Spacing is the case it doesn't settle. In every wording, some runs
+raised the spacing two to nine steps too far and said "Done": round 4 in 4 of 23 runs, round 7 in 7 of 23. That
+difference is within what 23 runs can show; a difference that size would turn up by chance about half the time. But
+round 7 is no better there, and it doesn't meet the bar that no case ends in "Done" with its end state unmet in 3
+runs: neither does any wording tried, over enough runs. Seven wordings haven't stopped it. One of the app-side fixes
+above is the next step.
 
 ## Not measured here
 
