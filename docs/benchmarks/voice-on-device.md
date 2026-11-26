@@ -617,7 +617,8 @@ measured against the bars only.
 **The short of it.** The hosted model already picked the right tool for all eight cases, 24 of 24, before anything
 changed. What it got wrong was how it called them. It gave the spacing as a bare number, which the tool can't read, so
 "space the row out more" changed nothing. Its other misses were second calls. The wording now asks for every value as
-text and for one call a command. Hosted "right" went from **18 of 24 to 20 of 24**, and the spacing is read every time.
+text, and for a command to be carried out once, with a call for each of several things. Hosted "right" went from
+**18 of 24 to 20 of 24**, and the spacing is read every time.
 One thing it didn't fix: told "more", the model sometimes raises the spacing again each time the canvas shows the last
 change (below). The on-device model is told and handed exactly what it was before, and scored the same. Fix round 1,
 at the end, scores where the design ends up as well, and keeps a seventh wording.
@@ -813,7 +814,9 @@ the same, byte for byte.
 **What changed in the measurement.**
 - **Where the design ends up.** `VoiceStructureLiveTests` now also checks it, case by case. "Right" is now the
   harness's right with the design where the command asked. A run that ends in "Done" with nothing done is counted as
-  "said done, not done". Spacing counts as done from 13 to 48: one step more, not a spacing raised again and again.
+  "said done, not done". Spacing counts as done when it is raised once, in one call, to no more than 48: one step
+  more, not a spacing raised again and again. (Fix round 2 tightened this from "anywhere from 13 to 48", which let one
+  run of three raises, to 48, count as done; the figures here are scored the tightened way.)
 - **In view.** The screen is now in view, marked "[in view]" as the harness's is. A test that runs in CI,
   `VoiceStructureDesignTests`, compares the whole canvas text with the harness's. The only differences it allows are
   the toggle's colour and the label's y.
@@ -889,8 +892,10 @@ Where right and done differ, the model made a second call; done counts the desig
   run went on to group and ungroup the card's contents in 6 calls and ended a grid of 1. None in rounds 6 and 7, after
   the description's example.
 - **The spacing.** Raised again and again: in round 5, to 180 and 120; in round 7, to 80.
-- **"Make these a row"** in round 5, and **"put these in a column"** in round 6: a second call after the group, a
-  resize, or a second group of everything. The design was still right.
+- **"Make these a row"** in round 5, and **"put these in a column"** in round 6: the group was made, then a second call
+  changed something else. In round 5 run 2 the model resized Email to 170, unasked. In round 6 run 1 it wrapped E2, E5,
+  the new column E13 and E10 in another column, E14. Both count as done, because done checks only what was asked (the
+  fields in a row, or a column, of their own), not that nothing else changed.
 
 **More runs of the cases that moved.** Done, of the runs made. Where the spacing was raised again and again, the calls
 it took are in brackets.
@@ -899,8 +904,8 @@ it took are in brackets.
 |---|---|---|---|
 | "Take the toggle out of the row", 10 runs | 10 | 10 | 10 |
 | "Space the row out more", first 10 runs | 8 (3 and 4 calls) | 7 (6, 6 and 10) | 7 (3, 4 and 4) |
-| "Space the row out more", 10 more runs | 8 (4 and 4) | not run | 7 (3, 4 and 10) |
-| "Space the row out more", with the 3 above: done | **19 of 23** | 10 of 13 | **16 of 23** |
+| "Space the row out more", 10 more runs | 8 (4 and 4) | not run | 6 (4, 3, 10 and 3) |
+| "Space the row out more", with the 3 above: done | **19 of 23** | 10 of 13 | **15 of 23** |
 
 With the three runs above, round 4's take-out was done 13 of 13, and so was round 7's. The 21-call run of round 4's
 first measurement didn't come back in 13 runs, so it can't be pinned on round 4's wording or cleared of it. Round 7 says
@@ -911,7 +916,7 @@ tests the crash hit were run again. Round 6 failed 2. The new screen failed once
 content" while the screen was being written, and passed when run again. The turn failed in the 12 and in 1 of 3 runs
 after.
 
-The turn, run 4 more times on each wording (the turn's run in the 12 is counted in the last column):
+The turn, run again on each wording, 4 times (3 on round 6); the turn's run in the 12 is counted in the last column:
 
 | Wording | Turned to 90° | All runs of the turn |
 |---|---|---|
@@ -931,11 +936,75 @@ first run before this task.
 
 **What it led to.** Round 7's wording is kept: 23 of 24 right, take-out done 13 of 13, the grid 3 of 3, and the turn 5
 of 5. All 12 live tests passed at the first try. Spacing is the case it doesn't settle. In every wording, some runs
-raised the spacing two to nine steps too far and said "Done": round 4 in 4 of 23 runs, round 7 in 7 of 23. That
-difference is within what 23 runs can show; a difference that size would turn up by chance about half the time. But
-round 7 is no better there, and it doesn't meet the bar that no case ends in "Done" with its end state unmet in 3
-runs: neither does any wording tried, over enough runs. Seven wordings haven't stopped it. One of the app-side fixes
-above is the next step.
+raised the spacing again and again, two to nine steps more, and said "Done" or asked a question: round 4 in 4 of 23
+runs, round 7 in 8 of 23 (corrected in fix round 2, which counts only one raise as done: one round-7 run raised it three
+times, to 48, and was counted done). A difference that size would turn up by chance about a third of the time (Fisher's
+exact, p ≈ 0.31). Round 7 is worse there by about one "space it out more" in six, and it doesn't meet the bar that no
+case ends in "Done" with its end state unmet in 3 runs; neither does any wording tried, over enough runs. Seven
+wordings haven't stopped it. One of the app-side fixes above is the next step.
+
+### Fix round 2 (2026-11-26)
+
+A second review found two things.
+- One round-7 run raised the spacing three times, to 48, and was counted as done. The figures above are corrected for
+  it: spacing is now done only when raised once, in one call.
+- The kept rules say neither to combine nor to repeat when one command asks two things of one element, and no live
+  test tried that. The "45 more" line is also the turn test's own phrase.
+
+So three live commands were added, each judged by where the design ends up and by its calls, at most one for each
+change asked for:
+- "Make the title bigger and bold", with the title made regular first;
+- "Move it down and make it half as wide", with the button selected; half of its 353 points or half the screen both
+  count;
+- "Rotate it 30 degrees, then 30 more".
+
+**Spacing, scored the tightened way.** Done means raised once, in one call. The calls each runaway took are in brackets.
+
+| Wording | Runs | Done | Ran away |
+|---|---|---|---|
+| Round 4 | 23 | 19 | 4 (4, 3, 4, 4) |
+| Round 5 | 3 | 1 | 2 (7, 6) |
+| Round 6 | 13 | 10 | 3 (6, 6, 10) |
+| Round 7, kept | 23 | 15 | 8 (4; 4, 4, 3; 4, 3, 10, 3) |
+| Round 8, below | 3 | 1 | 2 (3, 3) |
+
+**The new commands on round 7,** 3 runs each, from 09:48:53 (load 1.74, 3.06, 9.66):
+
+| Command | End state reached | Within a call for each change |
+|---|---|---|
+| "Make the title bigger and bold" | 3 of 3: bold, 32, 48 and 32 pt | 2 of 3. The miss restyled it 3 times, to 48 pt |
+| "Move it down and make it half as wide" | 3 of 3: half width, moved down | 1 of 3. The misses moved it at least 7 and 5 times, to y830 and y750 of the screen's 852 |
+| "Rotate it 30 degrees, then 30 more" | 3 of 3: 60° | 3 of 3: 30, then by 30 |
+
+The misses are the spacing's runaway again: "bigger" and "down" made again each time the canvas showed the last change.
+
+**Round 8,** the reviewer's wording, in the full rules only. The once line became "Give a tool everything one element
+needs in one call, such as a colour and a size in one look, or a place and a width in one move, and call the same tool
+on the same element again only if its reply said it couldn't be done", with "Carry out a command once", "more, bigger
+and further" and "a call for each" kept.
+- The eight cases, 3 runs each, from 10:01:12 (load 40.17, 53.34, 37.96): **20 of 24 right**, 22 of 24 done, 2 said
+  done with it not done, against round 7's 23, 23 and 1. "Put these in a column" was right 1 of 3, done 3 of 3: a second
+  call after the group. The spacing was raised 3 times in 2 runs, to 60.
+- The live tests, once each, from 10:07:12 (load 3.31, 21.26, 28.14): 14 of 15 passed, the three new ones among them.
+  "Move it down and make it half as wide" moved the button 5 times, then wrote on without end. The log shows it turning
+  over "move it down" again and again, 12,554 streamed pieces in 10 minutes without a call or an answer. The run was
+  stopped at 10:21.
+
+Round 8 is worse on the eight cases and on the move, so it wasn't kept, and the rest of its runs weren't made. Round 7
+stays.
+
+**What it led to.** Round 7's wording stays, with its costs:
+- about one "space it out more" in three runs away (8 of 23 runs);
+- a compound command with "bigger" or "down" in it sometimes makes that change two to six times too many (3 of 6 runs
+  above).
+
+Every one of these ends with the design changed in the direction asked, and one undo takes back the whole command.
+Eight wordings haven't stopped "more", "bigger" or "down" being carried out again each time the canvas shows the
+change. One of the app-side fixes above is the next step: refuse a second change to the same thing in one command, or
+don't tell a hosted model the canvas again mid-command.
+
+The full CI plan, from 10:24:51 (load 19.32): 2,279 tests in 215 suites passed. An earlier full run, from 10:21:58,
+failed only `OpeningDesignTests`' timing test, which passed when run alone and in the rerun.
 
 ## Not measured here
 
