@@ -85,11 +85,78 @@ struct VoiceOnTheTreeTests {
         #expect(turned.children.map(\.frame) == row.children.map(\.frame))
     }
 
-    @Test func aLaidOutChildCantBeAligned() {
+    /// One thing in a row is lined up by the row's alignment, as the Format panel's Align does (2026-11-26): an alignment
+    /// the row has a use for is set on it, as one step, and the reply says what the person sees change; one along the row
+    /// changes nothing, and the refusal names the row and the alignments it takes, for one child or two.
+    @Test func aLaidOutChildIsAlignedByItsRow() throws {
         let bench = bench()
         let before = bench.store.tree
-        #expect(bench.box.alignElement(element: "E6", alignment: "left")
-            == "E6 is in the row E5, which places it. To line things up in E5, call setLayout on E5 with an alignment, such as row centred.")
+        #expect(bench.box.alignElement(element: "E6", alignment: "bottom") == "Aligned E5's contents to the bottom.")
+        #expect(!bench.box.lastFailed)
+        #expect(bench.store.node(bench.login.row)?.layout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .end)))
+        #expect(bench.store.parent(of: bench.login.label) == .node(bench.login.row))
+        bench.login.undo.undo()
+        #expect(bench.store.tree == before)
+        #expect(!bench.login.undo.canUndo)
+
+        let rowTakes = "which aligns what it holds only to the top, vertical centre or bottom."
+        #expect(bench.box.alignElement(element: "E6", alignment: "left") == "E6 is in the row E5, \(rowTakes)")
+        #expect(bench.box.lastFailed)
+        #expect(bench.box.alignElement(element: "E6, E7", alignment: "right") == "E6 and E7 are in the row E5, \(rowTakes)")
+        #expect(bench.box.lastFailed)
+        #expect(bench.store.tree == before)
+    }
+
+    /// A screen whose root lays out a column: one thing on it is lined up by the column's alignment, which the reply
+    /// names by the screen's handle, and top, middle and bottom are along the column.
+    @Test func aLaidOutScreensChildIsAlignedByItsColumn() throws {
+        let bench = bench { login in
+            let root = login.model.store.treeScreen(login.screen)?.root.id
+            root.map { login.model.store.setLayout($0, .stack(LayerNode.Stack(axis: .vertical, spacing: 24))) }
+            login.undo.removeAllActions()
+        }
+        let root = try #require(bench.store.treeScreen(bench.login.screen)?.root.id)
+        let before = bench.store.tree
+        #expect(bench.box.alignElement(element: "E1", alignment: "top")
+            == "E1 is in the column S1, which aligns what it holds only to the left, centre or right.")
+        #expect(bench.store.tree == before)
+
+        #expect(bench.box.alignElement(element: "E1", alignment: "centre") == "Aligned S1's contents to the centre.")
+        #expect(bench.store.node(root)?.layout == .stack(LayerNode.Stack(axis: .vertical, spacing: 24, alignment: .center)))
+        bench.login.undo.undo()
+        #expect(bench.store.tree == before)
+        #expect(!bench.login.undo.canUndo)
+    }
+
+    /// `placeElement` towards an edge of the screen is an align ("an edge is what was meant"), so a row's child follows
+    /// the one rule there too (Ruling 6, 2026-11-26): the row's alignment, as one step, or, along the row, a refusal
+    /// naming what the row takes. So does a placement by another thing that the person didn't ask for, which the
+    /// on-device model makes of "move it down"; asked for one, it is a place, which the row gives.
+    @Test func placingARowChildAtAnEdgeAlignsTheRow() throws {
+        let bench = bench()
+        let before = bench.store.tree
+        #expect(bench.box.placeElement(element: "E6", relation: "above", target: "S1") == "Aligned E5's contents to the top.")
+        #expect(bench.store.node(bench.login.row)?.layout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .start)))
+        #expect(bench.store.parent(of: bench.login.label) == .node(bench.login.row))
+        bench.login.undo.undo()
+        #expect(bench.store.tree == before)
+        #expect(!bench.login.undo.canUndo)
+
+        #expect(bench.box.placeElement(element: "E6", relation: "left of", target: "S1")
+            == "E6 is in the row E5, which aligns what it holds only to the top, vertical centre or bottom.")
+        #expect(bench.box.lastFailed)
+        #expect(bench.store.tree == before)
+
+        // "Move the Wi-Fi label down" names no other thing to go by: E1 as the target is taken as the bottom edge.
+        bench.box.spokenCommand = "Move the Wi-Fi label down"
+        #expect(bench.box.placeElement(element: "E6", relation: "below", target: "E1") == "Aligned E5's contents to the bottom.")
+        #expect(bench.store.node(bench.login.row)?.layout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .end)))
+        bench.login.undo.undo()
+        #expect(bench.store.tree == before)
+        #expect(!bench.login.undo.canUndo)
+
+        bench.box.spokenCommand = "Put the Wi-Fi label below the title"
+        #expect(bench.box.placeElement(element: "E6", relation: "below", target: "E1") == Self.rowChildLine)
         #expect(bench.store.tree == before)
     }
 

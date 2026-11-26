@@ -55,6 +55,266 @@ private func design(_ screens: [TreeScreen], canvas: [LayerNode] = []) -> TreeCo
 
 private let rhythm = DesignTokens.standard.rhythm
 
+// MARK: Align on every surface
+
+/// One thing the Align parity tests line up, and what the standard says doing so leaves (`expect`): given the store
+/// afterwards, the alignment, the tree before and the case's name for what is reported.
+@MainActor
+private struct AlignSubject {
+    let name: String
+    let id: UUID
+    let expect: @MainActor (DesignStore, ElementLayout.Alignment, TreeContent, String) -> Void
+    /// Whether its laid-out parent has no use for an alignment, which every surface refuses, Siri with
+    /// `alignmentNotTaken`.
+    var isNotTaken: @MainActor (ElementLayout.Alignment) -> Bool = { _ in false }
+
+    nonisolated private static let across: [ElementLayout.Alignment: LayerNode.Edge3] = [.left: .start, .centerX: .center, .right: .end]
+    nonisolated private static let down: [ElementLayout.Alignment: LayerNode.Edge3] = [.top: .start, .centerY: .center, .bottom: .end]
+
+    /// A child of the laid-out `parent`, which takes the layout `aligned` gives for an alignment, and with nil changes
+    /// nothing: the child stays where it is in it.
+    static func laidOut(_ name: String, _ id: UUID, in parent: UUID,
+                        _ aligned: @escaping @MainActor (ElementLayout.Alignment) -> LayerNode.Layout?) -> AlignSubject {
+        AlignSubject(name: name, id: id, expect: { store, alignment, before, what in
+            guard let layout = aligned(alignment) else {
+                #expect(store.tree == before, "\(what): nothing changes")
+                return
+            }
+            #expect(store.node(parent)?.resolvedLayout == layout, "\(what)")
+            #expect(store.node(parent)?.children.contains { $0.id == id } == true, "\(what): it stays in its parent")
+        }, isNotTaken: { aligned($0) == nil })
+    }
+
+    /// A row's child: top, middle and bottom are the row's; left, centre and right are along it.
+    static func inARow(_ name: String, _ id: UUID, in row: UUID, _ stack: LayerNode.Stack) -> AlignSubject {
+        laidOut(name, id, in: row) { alignment in
+            down[alignment].map { edge in var aligned = stack; aligned.alignment = .init(edge); return .stack(aligned) }
+        }
+    }
+
+    /// A column's child: left, centre and right are the column's; top, middle and bottom are along it.
+    static func inAColumn(_ name: String, _ id: UUID, in column: UUID, _ stack: LayerNode.Stack) -> AlignSubject {
+        laidOut(name, id, in: column) { alignment in
+            across[alignment].map { edge in var aligned = stack; aligned.alignment = .init(edge); return .stack(aligned) }
+        }
+    }
+
+    /// A grid's or an overlay's alignment with the button's edge set, on its axis.
+    nonisolated static func both(_ alignment: LayerNode.Alignment, _ button: ElementLayout.Alignment) -> LayerNode.Alignment {
+        LayerNode.Alignment(horizontal: across[button] ?? alignment.horizontal, vertical: down[button] ?? alignment.vertical)
+    }
+
+    /// A thing in a free parent on an iPhone screen, 393 × 852: lined up with that edge or middle of the screen, by the
+    /// box round its shape, its corner on a whole point.
+    static func onItsScreen(_ name: String, _ id: UUID) -> AlignSubject {
+        AlignSubject(name: name, id: id, expect: { store, alignment, _, what in
+            guard let seen = store.index[id]?.hostShape.bounds else {
+                Issue.record("\(what): it has gone")
+                return
+            }
+            let lined = switch alignment {
+            case .left: abs(seen.minX) <= 0.5
+            case .centerX: abs(seen.midX - 196.5) <= 0.5
+            case .right: abs(seen.maxX - 393) <= 0.5
+            case .top: abs(seen.minY) <= 0.5
+            case .centerY: abs(seen.midY - 426) <= 0.5
+            case .bottom: abs(seen.maxY - 852) <= 0.5
+            }
+            #expect(lined, "\(what): \(seen)")
+        })
+    }
+
+    /// A thing on the open canvas in no laid-out parent: there is no screen to line it up with, and nothing changes.
+    static func offScreen(_ name: String, _ id: UUID) -> AlignSubject {
+        AlignSubject(name: name, id: id, expect: { store, _, before, what in
+            #expect(store.tree == before, "\(what): nothing changes")
+        })
+    }
+}
+
+/// The design the Align parity tests share (2026-11-26), its ids fixed so that every app made from it holds the same
+/// tree. An iPhone screen with a free root holds:
+/// - a row at (20, 100), 8 apart, lined up at the top, of a short text and a tall one;
+/// - a column at (20, 200), 8 apart, lined up on the left, of a narrow text and a wide one;
+/// - a grid of two at (20, 320), 8 apart, centred, of three texts of two sizes;
+/// - an overlay at (20, 440), centred, of a wide text behind a narrow one;
+/// - a free card at (20, 540) holding a text at (16, 16);
+/// - a text at (20, 700) on the root.
+///
+/// A second screen, at (453, 0), lays its root out in a column 24 apart, lined up on the left, of a narrow and a wide
+/// text. The open canvas holds a row at (1000, 100) like the screen's, and a sticky note at (1000, 300).
+@MainActor
+private struct AlignFixture {
+    let tree: TreeContent
+    let subjects: [AlignSubject]
+    /// Two things together: in each laid-out parent; one in a free parent and one in a row; one in a row and one in a
+    /// column.
+    let pairs: [(name: String, ids: [UUID])]
+    let rowChild, card, inCard, loose: UUID
+
+    init() {
+        let row = LayerNode.Stack(axis: .horizontal, spacing: 8), column = LayerNode.Stack(axis: .vertical, spacing: 8)
+        let grid = LayerNode.Grid(columns: 2, columnSpacing: 8, rowSpacing: 8), overlay = LayerNode.Alignment()
+        let root = LayerNode.Stack(axis: .vertical, spacing: 24)
+
+        let rowA = text(0, 0), rowB = text(0, 0, height: 40)
+        let rowNode = container(.group, .stack(row), frame: CGRect(x: 20, y: 100, width: 128, height: 40), [rowA, rowB])
+        let columnA = text(0, 0), columnB = text(0, 0, width: 100)
+        let columnNode = container(.group, .stack(column), frame: CGRect(x: 20, y: 200, width: 100, height: 56),
+                                   [columnA, columnB])
+        let gridA = text(0, 0), gridB = text(0, 0, width: 100, height: 40), gridC = text(0, 0)
+        let gridNode = container(.group, .grid(grid), frame: CGRect(x: 20, y: 320, width: 208, height: 72), [gridA, gridB, gridC])
+        let back = text(0, 0, width: 120, height: 60), front = text(0, 0)
+        let overlayNode = container(.group, .overlay(overlay), frame: CGRect(x: 20, y: 440, width: 120, height: 60), [back, front])
+        let inCard = text(16, 16)
+        let card = container(.card, frame: CGRect(x: 20, y: 540, width: 200, height: 100), [inCard])
+        let loose = text(20, 700)
+        var free = screen([rowNode, columnNode, gridNode, overlayNode, card, loose])
+        free.name = "Free"
+
+        let rootA = text(0, 0), rootB = text(0, 0, width: 200)
+        var laidOut = TreeScreen(name: "Column", origin: CGPoint(x: 453, y: 0), scale: 1, deviceID: nil)
+        laidOut.root.layout = .stack(root)
+        laidOut.root.children = [rootA, rootB]
+
+        let canvasA = text(0, 0), canvasB = text(0, 0, height: 40)
+        let canvasRow = container(.group, .stack(row), frame: CGRect(x: 1000, y: 100, width: 128, height: 40), [canvasA, canvasB])
+        var note = LayerNode(kind: .stickyNote)
+        note.frame = CGRect(x: 1000, y: 300, width: 150, height: 150)
+        note.content.text = "Idea"
+
+        tree = design([free, laidOut], canvas: [canvasRow, note])
+        subjects = [
+            .inARow("a row's child", rowA.id, in: rowNode.id, row),
+            .inAColumn("a column's child", columnA.id, in: columnNode.id, column),
+            .laidOut("a grid's child", gridB.id, in: gridNode.id) { button in
+                var aligned = grid
+                aligned.alignment = AlignSubject.both(grid.alignment, button)
+                return .grid(aligned)
+            },
+            .laidOut("an overlay's child", front.id, in: overlayNode.id) { .overlay(AlignSubject.both(overlay, $0)) },
+            .inAColumn("a laid-out screen root's child", rootA.id, in: laidOut.root.id, root),
+            .inARow("a row's child on the open canvas", canvasA.id, in: canvasRow.id, row),
+            .onItsScreen("a free card's child", inCard.id),
+            .onItsScreen("a thing on a free root", loose.id),
+            .offScreen("a sticky note on the open canvas", note.id),
+        ]
+        pairs = [
+            ("a row's children", [rowA.id, rowB.id]),
+            ("a column's children", [columnA.id, columnB.id]),
+            ("a grid's children", [gridA.id, gridC.id]),
+            ("an overlay's children", [back.id, front.id]),
+            ("a laid-out screen root's children", [rootA.id, rootB.id]),
+            ("a canvas row's children", [canvasA.id, canvasB.id]),
+            ("a free thing and a row's child", [loose.id, rowB.id]),
+            ("a row's child and a column's", [rowA.id, columnA.id]),
+        ]
+        rowChild = rowA.id
+        self.card = card.id
+        self.inCard = inCard.id
+        self.loose = loose.id
+    }
+}
+
+/// Three apps made from one tree, each with an undo history of its own: one for the Format panel's Align, one for
+/// voice's (a toolbox on the handles of one capture, as a call has) and one for Siri's. `prepare` runs on each, as no
+/// step.
+@MainActor
+private struct AlignSurfaces {
+    @MainActor
+    struct App {
+        let model: AppModel
+        let undo: UndoManager
+        var store: DesignStore { model.store }
+    }
+
+    let panel: App
+    let voice: App
+    let siri: App
+    let handles: VoiceHandles
+    let box: VoiceToolbox
+
+    var apps: [App] { [panel, voice, siri] }
+
+    init(_ tree: TreeContent, prepare: (DesignStore) -> Void = { _ in }) {
+        func app() -> App {
+            let (model, undo) = makeModel(tree)
+            prepare(model.store)
+            undo.removeAllActions()
+            return App(model: model, undo: undo)
+        }
+        panel = app()
+        voice = app()
+        siri = app()
+        handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: voice.model, handles: handles)
+        box = VoiceToolbox(model: voice.model, handles: handles)
+    }
+
+    /// The words voice's model says for each alignment.
+    static func spoken(_ alignment: ElementLayout.Alignment) -> String {
+        switch alignment {
+        case .left: "left"
+        case .centerX: "centre"
+        case .right: "right"
+        case .top: "top"
+        case .centerY: "vertical centre"
+        case .bottom: "bottom"
+        }
+    }
+
+    /// Selects the thing on the panel's app and taps its Align button: whether the button was on.
+    func alignOnThePanel(_ id: UUID, _ alignment: ElementLayout.Alignment) -> Bool {
+        panel.model.selection = panel.store.ref(of: id).map(CanvasSelection.element)
+        let isOn = panel.model.canLineUpSelection(alignment)
+        panel.model.lineUpSelection(alignment)
+        return isOn
+    }
+
+    /// Asks voice's `alignElement` to align the thing: what it said.
+    func alignByVoice(_ id: UUID, _ alignment: ElementLayout.Alignment) -> String {
+        box.alignElement(element: handles.handle(forNode: id), alignment: Self.spoken(alignment))
+    }
+
+    /// Runs Siri's Align Element on the thing: the error it threw, or nil.
+    func alignBySiri(_ id: UUID, _ alignment: ElementLayout.Alignment) -> LayerIntentError? {
+        guard let ref = siri.store.ref(of: id) else { return .elementNotFound }
+        do {
+            try AlignElementIntent.align(ref, in: siri.model, alignment, undoManager: nil)
+            return nil
+        } catch let error as LayerIntentError {
+            return error
+        } catch {
+            Issue.record("Siri's Align threw \(error)")
+            return nil
+        }
+    }
+
+    /// What Siri says for an error.
+    func said(_ error: LayerIntentError?) -> String? {
+        error.map { String(localized: $0.localizedStringResource) }
+    }
+
+    /// Whether Siri threw `alignmentNotTaken`.
+    func isAlignmentNotTaken(_ error: LayerIntentError?) -> Bool {
+        if case .alignmentNotTaken? = error { true } else { false }
+    }
+
+    /// On each app that changed, one undo puts `before` back and leaves nothing more to undo. On each that didn't, a
+    /// refusal or an alignment the parent already has, there is no step at all.
+    func expectOneStepEach(back before: TreeContent, _ what: String) {
+        for (name, app) in [("panel", panel), ("voice", voice), ("Siri", siri)] {
+            guard app.store.tree != before else {
+                #expect(!app.undo.canUndo, "\(what): \(name) made a step that changed nothing")
+                continue
+            }
+            app.undo.undo()
+            #expect(app.store.tree == before, "\(what): \(name)'s undo")
+            #expect(!app.undo.canUndo, "\(what): \(name)'s one step")
+        }
+    }
+}
+
 private extension DesignStore {
     /// The things with these ids, wherever they are.
     func selection(of ids: [UUID]) throws -> CanvasSelection {
@@ -382,7 +642,8 @@ struct GroupAsTests {
         #expect(!linedUp.isSelectionLaidOut)
         #expect(linedUp.canLineUpSelection(.left))
 
-        aligned.alignSelection(.left)
+        // Today's Align among several things, which moves every one of them.
+        aligned.store.align(selection, .left)
         linedUp.lineUpSelection(.left)
 
         #expect(linedUp.store.node(b.id)?.frame.minX == 20)
@@ -477,6 +738,87 @@ struct GroupAsTests {
 
         model.selection = try model.store.selection(of: [back.id])
         #expect(model.canArrangeSelection(.forward))
+    }
+
+    // MARK: One rule for Align on every surface (2026-11-26)
+
+    /// The user asked for one standard for aligning things in a row, and it is the Format panel's (spec §10): one thing
+    /// a row, column, grid or overlay places, a screen's laid-out root among them, is lined up by that parent's
+    /// alignment when the parent has a use for it; when it has none, nothing changes; and one thing in a free parent
+    /// lines up with its screen. The panel, voice's `alignElement` and Siri's Align Element each act on an app of their
+    /// own holding the same tree and leave the same tree, which one undo takes back, and each does something exactly
+    /// when the panel's button is on.
+    @Test(arguments: ElementLayout.Alignment.allCases)
+    func oneThingIsAlignedAlikeOnEverySurface(_ alignment: ElementLayout.Alignment) throws {
+        let fixture = AlignFixture()
+        for subject in fixture.subjects {
+            let surfaces = AlignSurfaces(fixture.tree)
+            let before = surfaces.panel.store.tree
+            #expect(surfaces.voice.store.tree == before && surfaces.siri.store.tree == before)
+            let what = "\(subject.name), \(alignment)"
+
+            let isOn = surfaces.alignOnThePanel(subject.id, alignment)
+            let line = surfaces.alignByVoice(subject.id, alignment)
+            let error = surfaces.alignBySiri(subject.id, alignment)
+
+            let after = surfaces.panel.store.tree
+            #expect(surfaces.voice.store.tree == after, "\(what): voice said “\(line)”")
+            #expect(surfaces.siri.store.tree == after, "\(what): Siri said \(surfaces.said(error) ?? "nothing")")
+            #expect(surfaces.box.lastFailed == !isOn, "\(what): voice said “\(line)”")
+            #expect((error == nil) == isOn, "\(what): Siri said \(surfaces.said(error) ?? "nothing")")
+            // What each says: voice that it aligned, what it did; Siri, for a parent with no use for the alignment,
+            // which ones that parent takes.
+            if isOn { #expect(line.hasPrefix("Aligned "), "\(what): voice said “\(line)”") }
+            if subject.isNotTaken(alignment) {
+                #expect(!isOn, "\(what)")
+                #expect(surfaces.isAlignmentNotTaken(error), "\(what): Siri said \(surfaces.said(error) ?? "nothing")")
+            }
+            subject.expect(surfaces.panel.store, alignment, before, what)
+            surfaces.expectOneStepEach(back: before, what)
+        }
+    }
+
+    /// Several things: the popover's Align and voice's leave the same tree, in one laid-out parent (its alignment, or
+    /// nothing), across a free and a laid-out parent (the free one moves), and across two laid-out parents (nothing).
+    @Test(arguments: ElementLayout.Alignment.allCases)
+    func severalThingsAreAlignedAlikeByThePopoverAndVoice(_ alignment: ElementLayout.Alignment) throws {
+        let fixture = AlignFixture()
+        for pair in fixture.pairs {
+            let surfaces = AlignSurfaces(fixture.tree)
+            let before = surfaces.panel.store.tree
+            let what = "\(pair.name), \(alignment)"
+
+            surfaces.panel.model.selection = try surfaces.panel.store.selection(of: pair.ids)
+            let isOn = surfaces.panel.model.canLineUpSelection(alignment)
+            surfaces.panel.model.lineUpSelection(alignment)
+            let named = pair.ids.map { surfaces.handles.handle(forNode: $0) }.joined(separator: ", ")
+            let line = surfaces.box.alignElement(element: named, alignment: AlignSurfaces.spoken(alignment))
+
+            #expect(surfaces.voice.store.tree == surfaces.panel.store.tree, "\(what): voice said “\(line)”")
+            #expect(surfaces.box.lastFailed == !isOn, "\(what): voice said “\(line)”")
+            surfaces.expectOneStepEach(back: before, what)
+        }
+    }
+
+    /// Locked things are refused as before, on every surface: by their own lock, and by their container's.
+    @Test(arguments: ElementLayout.Alignment.allCases)
+    func aLockedThingIsRefusedOnEverySurface(_ alignment: ElementLayout.Alignment) throws {
+        let fixture = AlignFixture()
+        for (name, id, locking) in [("a row's child", fixture.rowChild, fixture.rowChild),
+                                    ("a thing in a locked card", fixture.inCard, fixture.card),
+                                    ("a thing on a free root", fixture.loose, fixture.loose)] {
+            let surfaces = AlignSurfaces(fixture.tree) { store in store.update(locking) { $0.isLocked = true } }
+            let before = surfaces.panel.store.tree
+            let what = "\(name), \(alignment)"
+
+            #expect(!surfaces.alignOnThePanel(id, alignment), "\(what)")
+            #expect(surfaces.alignByVoice(id, alignment) == "\(surfaces.handles.handle(forNode: id)) is locked.", "\(what)")
+            #expect(surfaces.said(surfaces.alignBySiri(id, alignment)) == "That's locked. Unlock it in Layer first.", "\(what)")
+            for app in surfaces.apps {
+                #expect(app.store.tree == before, "\(what)")
+                #expect(!app.undo.canUndo, "\(what)")
+            }
+        }
     }
 
     // MARK: Ungroup

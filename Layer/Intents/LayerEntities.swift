@@ -29,8 +29,11 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     /// is arranged among, which for a member of a group is the others in its group.
     case cantGoFurther(withinGroup: Bool)
     case invalidImage
-    /// What a row, column or grid places, or for Align an overlay too, isn't moved or arranged on its own (spec §10).
+    /// What a row, column or grid places isn't moved or arranged on its own (spec §10).
     case laidOut
+    /// Align asked a row or column for an alignment along it, which it has no use for (Align Top in a column), and
+    /// nothing changed: the container as Siri names it ("a row", "its screen's column") and the alignments it takes.
+    case alignmentNotTaken(container: String, takes: [ElementLayout.Alignment])
     /// No device of the design's own has the name given.
     case deviceNotFound(String)
 
@@ -57,8 +60,25 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .cantGoFurther(withinGroup: false): "That element can't go any further that way."
         case .invalidImage: "Layer couldn't read that file as a picture."
         case .laidOut: "That element's place comes from the row, column or grid it's in. Change its order in the Layers panel, or move it out of the container first."
+        case .alignmentNotTaken(let container, let takes): "That element is in \(container), which aligns what it holds only to \(Self.listed(takes)). Nothing was changed."
         case .deviceNotFound(let name): "This design has no device called “\(name)”. Make one with Custom Size… in the device picker."
         }
+    }
+
+    /// Alignments as Siri's Alignment options name them, "the top edge, vertical middle or bottom edge".
+    private static func listed(_ alignments: [ElementLayout.Alignment]) -> String {
+        let names = alignments.map { alignment in
+            switch alignment {
+            case .left: "left edge"
+            case .centerX: "horizontal centre"
+            case .right: "right edge"
+            case .top: "top edge"
+            case .centerY: "vertical middle"
+            case .bottom: "bottom edge"
+            }
+        }
+        guard let last = names.last else { return "nothing" }
+        return "the " + (names.count > 1 ? names.dropLast().joined(separator: ", ") + " or " + last : last)
     }
 }
 

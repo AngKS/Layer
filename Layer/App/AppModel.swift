@@ -1874,17 +1874,6 @@ final class AppModel {
         return selected.node.isContainer && !selected.isLocked
     }
 
-    /// Lines up what is selected: one element with its screen, several things with each other. Reached through
-    /// `lineUpSelection(_:)`, which leaves what a row, column, grid or overlay places to it.
-    func alignSelection(_ alignment: ElementLayout.Alignment) {
-        guard let selection, !isSelectionLocked else { return }
-        switch selection {
-        case .element(let ref): store.align(ref, alignment)
-        case .several: store.align(selection, alignment)
-        case .screen: break
-        }
-    }
-
     /// Whether there are things enough to space evenly: it takes three to have a gap to even out (`lineUpSelection(_:)`).
     var canDistributeSelection: Bool {
         (selection?.things.count ?? 0) >= 3 && !isSelectionLocked

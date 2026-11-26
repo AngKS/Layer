@@ -235,8 +235,9 @@ final class VoiceToolbox: VoiceActing {
         return line + " To take it out of \(placer.handle), call moveElement again with takeOut yes and where it goes."
     }
 
-    /// Why a thing that is placed by a row, column, grid or overlay wasn't lined up, and what lines it up instead: for a
-    /// model without `setLayout`, the Format panel's Layout section.
+    /// Why things each placed by a row, column, grid or overlay of its own weren't lined up with one another, said of one
+    /// of them, and what lines it up instead: for a model without `setLayout`, the Format panel's Layout section. One
+    /// thing, or several in one such parent, is lined up by that parent's alignment itself (`alignElement`).
     func alignedLine(_ handle: String, _ placer: Placer) -> String {
         let how = offersStructureTools
             ? "call setLayout on \(placer.handle) with an alignment, such as \(placer.word) centred"

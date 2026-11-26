@@ -519,7 +519,7 @@ struct MoveElementToScreenIntent: AppIntent, UndoableIntent {
 struct AlignElementIntent: AppIntent, UndoableIntent {
     static let title: LocalizedStringResource = "Align Element"
     static let description = IntentDescription(
-        "Lines an element up with an edge or the middle of its screen. One that a row, column or grid places keeps its place there.",
+        "Lines an element up with an edge or the middle of its screen. One that a row, column, grid or overlay places is lined up by that container's alignment instead, as Align in the Format panel does.",
         categoryName: "Elements"
     )
     static let supportedModes: IntentModes = .foreground
@@ -527,7 +527,7 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Element", description: "The element to align. The selected element if not given.")
     var element: ElementEntity?
 
-    @Parameter(title: "Alignment", description: "Which edge or middle of the screen to line it up with.")
+    @Parameter(title: "Alignment", description: "Which edge or middle to line it up with: its screen's, or in a row, column, grid or overlay, that container's.")
     var alignment: AlignmentOption
 
     static var parameterSummary: some ParameterSummary {
@@ -541,21 +541,47 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
         return .result()
     }
 
-    /// Lines a node up with an edge or the middle of its screen, as one step, "Align", by the popover's and the Format
-    /// panel's rule (`AppModel.lineUpSelection`): only what sits in a free parent moves (spec §10). Throws `laidOut` for
-    /// one a row, column, grid or overlay places, a screen's root among them, `screenNotFound` for one off a screen,
-    /// `locked` and `elementNotFound`.
+    /// Lines a node up as the popover's and the Format panel's Align do, by the store's one decision
+    /// (`DesignStore.aligning`), as one step, "Align": in a row, column, grid or overlay, a screen's laid-out root among
+    /// them, by that container's alignment; in a free parent, with an edge or the middle of its screen (spec §10). Throws
+    /// `alignmentNotTaken` for an alignment the container has no use for, `screenNotFound` for one in a free parent off
+    /// a screen, `locked` and `elementNotFound`.
     @MainActor
     static func align(_ ref: NodeRef, in model: AppModel, _ alignment: ElementLayout.Alignment, undoManager: UndoManager?) throws {
         let store = model.store
         guard store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
-        try DesignActions.requireUnlocked(ref, in: model)
-        guard case .screen = ref.host else { throw LayerIntentError.screenNotFound }
         let thing = CanvasSelection.element(ref)
-        guard store.laidOutParent(of: thing) == nil, store.holdsSomethingInAFreeParent(thing) else { throw LayerIntentError.laidOut }
-        DesignActions.edit(model, undoManager: undoManager, actionName: "Align") {
-            store.align(ref, alignment)
+        switch store.aligning(thing, alignment) {
+        case .nothing(.locked):
+            throw LayerIntentError.locked
+        case .nothing(.offScreen):
+            throw LayerIntentError.screenNotFound
+        case .nothing(.notTaken(let parent, let takes)):
+            throw LayerIntentError.alignmentNotTaken(container: containerName(parent, of: ref, in: store), takes: takes)
+        case .nothing(.allPlaced):
+            // Defensive: only several things can each be placed by a parent of their own, and Siri aligns one.
+            throw LayerIntentError.laidOut
+        case .nothing(.gone), .nothing(.screen):
+            throw LayerIntentError.elementNotFound
+        case .setsLayout, .withItsScreen, .withEachOther:
+            DesignActions.edit(model, undoManager: undoManager, actionName: "Align") {
+                store.lineUp(thing, alignment)
+            }
         }
+    }
+
+    /// What Siri calls the container that places a node, which it can't see (My call 9): "a row", "a column", or for a
+    /// screen's laid-out root "its screen's column".
+    @MainActor
+    private static func containerName(_ parent: UUID, of ref: NodeRef, in store: DesignStore) -> String {
+        let word = switch store.node(parent)?.resolvedLayout {
+        case .stack(let stack)?: stack.axis == .horizontal ? "row" : "column"
+        case .grid?: "grid"
+        case .overlay?: "overlay"
+        case .free?, nil: "container"
+        }
+        if case .screen? = store.parent(of: ref.node) { return "its screen's \(word)" }
+        return word == "overlay" ? "an overlay" : "a \(word)"
     }
 }
 

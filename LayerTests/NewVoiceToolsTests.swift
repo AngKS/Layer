@@ -418,7 +418,7 @@ struct NewVoiceToolsTests {
     /// The on-device model is handed neither `setLayout` nor `reorder`, so nothing it is told names them: not its rules,
     /// and not a refusal, which names what the person can do instead (ruling I1).
     @Test func theOnDeviceRulesAndLinesNameOnlyItsTools() {
-        let bench = bench()
+        let bench = bench(Self.cardAsAColumn)
         let all = VoiceTools.all(bench.box).map(\.name)
         let handed = Set(VoiceProfile.onDeviceTools(bench.box, canEndCall: true, hasScreens: true).map(\.name))
         let missing = all.filter { !handed.contains($0) }
@@ -428,11 +428,20 @@ struct NewVoiceToolsTests {
         bench.box.offersStructureTools = false
         let placed = bench.box.moveElement(element: "E6", x: "40", y: "600", width: nil, height: nil, takeOut: nil)
         #expect(placed == "E6 is in the row E5, which places it. To change its place in E5, drag it in the Layers panel. To take it out of E5, call moveElement again with takeOut yes and where it goes.")
+        // One thing in a row is lined up by the row (2026-11-26): along it, the row has no use for the alignment.
         let aligned = bench.box.alignElement(element: "E6", alignment: "left")
-        #expect(aligned == "E6 is in the row E5, which places it. To line things up in E5, set E5's alignment in the Format panel's Layout section.")
-        for line in [placed, aligned] {
+        #expect(aligned == "E6 is in the row E5, which aligns what it holds only to the top, vertical centre or bottom.")
+        // A child of the card, now a column, and one of the row: each is placed, and only their own layouts line them up.
+        let apart = bench.box.alignElement(element: "E3, E6", alignment: "top")
+        #expect(apart == "E3 is in the column E2, which places it. To line things up in E2, set E2's alignment in the Format panel's Layout section.")
+        for line in [placed, aligned, apart] {
             #expect(!missing.contains(where: line.contains), "\(line)")
         }
+    }
+
+    /// The card E2 laid out as a column, 8 apart, as no step.
+    private static func cardAsAColumn(_ login: TreeFixture.Login, _: UUID, _: UUID) {
+        login.model.store.setLayout(login.card, .stack(LayerNode.Stack(axis: .vertical, spacing: 8)))
     }
 
     /// An empty canvas has no containers to tell of, so the on-device model isn't told of them there (ruling 2).
@@ -450,10 +459,12 @@ struct NewVoiceToolsTests {
 
     /// A hosted model, and a test's stand-in, have every tool, and are told to use them.
     @Test func aModelWithEveryToolIsToldToUseThem() {
-        let bench = bench()
+        let bench = bench(Self.cardAsAColumn)
         #expect(bench.box.offersStructureTools)
         #expect(bench.box.moveElement(element: "E6", x: "40", y: "600", width: nil, height: nil, takeOut: nil).contains("To change its place in E5, call reorder."))
-        #expect(bench.box.alignElement(element: "E6", alignment: "left").contains("call setLayout on E5 with an alignment, such as row centred."))
+        #expect(bench.box.alignElement(element: "E3, E6", alignment: "top").contains("call setLayout on E2 with an alignment, such as column centred."))
+        // One thing is aligned by its row itself, so no reply sends the model to setLayout for it (2026-11-26).
+        #expect(!bench.box.alignElement(element: "E6", alignment: "left").contains("setLayout"))
         #expect(VoiceRules.full.contains("reorder") && VoiceRules.full.contains("setLayout"))
     }
 
