@@ -985,7 +985,7 @@ and further" and "a call for each" kept.
 - The eight cases, 3 runs each, from 10:01:12 (load 40.17, 53.34, 37.96): **20 of 24 right**, 22 of 24 done, 2 said
   done with it not done, against round 7's 23, 23 and 1. "Put these in a column" was right 1 of 3, done 3 of 3: a second
   call after the group. The spacing was raised 3 times in 2 runs, to 60.
-- The live tests, once each, from 10:07:12 (load 3.31, 21.26, 28.14): 14 of 15 passed, the three new ones among them.
+- The live tests, once each, from 10:07:12 (load 3.31, 21.26, 28.14): 14 of 15 passed, two of the three new ones among them.
   "Move it down and make it half as wide" moved the button 5 times, then wrote on without end. The log shows it turning
   over "move it down" again and again, 12,554 streamed pieces in 10 minutes without a call or an answer. The run was
   stopped at 10:21.
