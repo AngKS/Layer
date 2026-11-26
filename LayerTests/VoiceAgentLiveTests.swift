@@ -208,7 +208,15 @@ struct VoiceAgentLiveTests {
 @MainActor
 struct VoiceStructureLiveTests {
     let model = ProcessInfo.processInfo.environment["LAYER_LMSTUDIO"] ?? ""
-    static let runs = 3
+    /// Three, or `TEST_RUNNER_LAYER_STRUCTURE_RUNS`.
+    static let runs = ProcessInfo.processInfo.environment["LAYER_STRUCTURE_RUNS"].flatMap(Int.init) ?? 3
+    /// With `TEST_RUNNER_LAYER_STRUCTURE_ONLY=<words>`, only the cases whose command holds those words, such as "take the
+    /// toggle", to run one case more times than the rest.
+    static let only = ProcessInfo.processInfo.environment["LAYER_STRUCTURE_ONLY"]?.lowercased()
+
+    static func isAsked(_ testCase: Case) -> Bool {
+        only.map { testCase.command.lowercased().contains($0) } ?? true
+    }
 
     /// The design a case is spoken over.
     enum Design {
@@ -396,13 +404,14 @@ struct VoiceStructureLiveTests {
     @Test func structureCommandsAreScored() async throws {
         var failures: [String] = []
         var eight = Score()
-        for testCase in Self.cases {
+        let asked = Self.cases.filter(Self.isAsked)
+        for testCase in asked {
             eight.add(await scored(testCase, failures: &failures))
         }
-        let count = Self.cases.count * Self.runs
+        let count = asked.count * Self.runs
         print("VOICE-STRUCTURE-SUM total \(eight.right)/\(count) right, \(eight.harnessRight)/\(count) right as the harness scores, "
             + "\(eight.rightTool)/\(count) right tool, \(eight.done)/\(count) done, \(eight.falseDone)/\(count) said done with it not done, model \(model)")
-        _ = await scored(Self.stackControl, failures: &failures)
+        if Self.isAsked(Self.stackControl) { _ = await scored(Self.stackControl, failures: &failures) }
         // A model that couldn't be reached mustn't pass for one that picked badly.
         #expect(failures.isEmpty, "\(failures)")
     }
