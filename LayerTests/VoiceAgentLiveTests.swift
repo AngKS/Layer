@@ -184,6 +184,58 @@ struct VoiceAgentLiveTests {
         print("VOICE-LIVE end: the button is turned \(rotation)°")
         #expect(outcome.problem == nil)
         #expect(abs(rotation - 90) < 0.5)
+        #expect(outcome.lines.count <= 2, "a call for each turn at most")
+    }
+
+    /// The same, in words the rules don't quote.
+    @Test func anotherTurnIsAddedToATurn() async throws {
+        let (app, screen, agent) = design()
+        let button = try #require(app.store.screenLeaves(screen).first { $0.kind == .button })
+        app.selection = .element(NodeRef(host: .screen(screen), node: button.id))
+        let outcome = await say("Rotate it 30 degrees, then 30 more", to: agent)
+        let rotation = app.store.node(button.id)?.rotation ?? 0
+        print("VOICE-LIVE end: the button is turned \(rotation)°")
+        #expect(outcome.problem == nil)
+        #expect(abs(rotation - 60) < 0.5)
+        #expect(outcome.lines.count <= 2, "a call for each turn at most")
+    }
+
+    // Two changes to one element in one command (fix round 2), judged by the end state and by the calls: at most one for
+    // each change asked for. "Bigger" and "down" are each one step; made again and again, they end far past what was
+    // asked, as "space the row out more" does.
+
+    @Test func aTitleIsMadeBiggerAndBold() async throws {
+        let (app, screen, agent) = design()
+        let title = try #require(app.store.screenLeaves(screen).first { $0.kind == .title })
+        // Regular to start with, so that "bold" has something to do: a title is bold by default.
+        app.store.update(title.id) { $0.style.fontWeight = .regular }
+        let tokens = app.store.tree.settings.tokens
+        let size = try #require(app.store.node(title.id)).resolvedFontSize(tokens: tokens)
+        let frame = try #require(app.store.ownFrame(title.id))
+        let outcome = await say("Make the title bigger and bold", to: agent)
+        let after = try #require(app.store.node(title.id))
+        let newSize = after.resolvedFontSize(tokens: tokens)
+        let newFrame = app.store.ownFrame(title.id) ?? frame
+        print("VOICE-LIVE end: the title is \(after.resolvedFontWeight.rawValue), \(newSize) pt (was \(size)), \(newFrame.size) (was \(frame.size))")
+        #expect(outcome.problem == nil)
+        #expect(after.resolvedFontWeight == .bold)
+        #expect(newSize > size || newFrame.height > frame.height)
+        #expect(outcome.lines.count <= 2, "a call for each change at most")
+    }
+
+    /// "Half as wide" is half the button's own 353 points, or half the screen's 393 as "half width" is: either is taken.
+    @Test func aButtonIsMovedDownAndHalved() async throws {
+        let (app, screen, agent) = design()
+        let button = try #require(app.store.screenLeaves(screen).first { $0.kind == .button })
+        app.selection = .element(NodeRef(host: .screen(screen), node: button.id))
+        let frame = try #require(app.store.ownFrame(button.id))
+        let outcome = await say("Move it down and make it half as wide", to: agent)
+        let after = try #require(app.store.ownFrame(button.id))
+        print("VOICE-LIVE end: the button is at y \(after.minY) (was \(frame.minY)), \(after.width) wide (was \(frame.width))")
+        #expect(outcome.problem == nil)
+        #expect(after.minY > frame.minY)
+        #expect(after.width >= frame.width * 0.45 && after.width <= 197.5)
+        #expect(outcome.lines.count <= 2, "a call for each change at most")
     }
 }
 
@@ -209,7 +261,7 @@ struct VoiceAgentLiveTests {
 struct VoiceStructureLiveTests {
     let model = ProcessInfo.processInfo.environment["LAYER_LMSTUDIO"] ?? ""
     /// Three, or `TEST_RUNNER_LAYER_STRUCTURE_RUNS`.
-    static let runs = ProcessInfo.processInfo.environment["LAYER_STRUCTURE_RUNS"].flatMap(Int.init) ?? 3
+    static let runs = max(1, ProcessInfo.processInfo.environment["LAYER_STRUCTURE_RUNS"].flatMap(Int.init) ?? 3)
     /// With `TEST_RUNNER_LAYER_STRUCTURE_ONLY=<words>`, only the cases whose command holds those words, such as "take the
     /// toggle", to run one case more times than the rest.
     static let only = ProcessInfo.processInfo.environment["LAYER_STRUCTURE_ONLY"]?.lowercased()
@@ -259,8 +311,9 @@ struct VoiceStructureLiveTests {
         var design = Design.account
         var tool: String
         var isRight: ([String: String]) -> Bool
-        /// Whether the design is where the command asked for it, and what it shows, in a few words.
-        var isDone: @MainActor (Built) -> (Bool, String)
+        /// Whether the design is where the command asked for it, and what it shows, in a few words. The calls are there for
+        /// a case whose end can't be told from the design alone: a spacing raised once, not again and again.
+        var isDone: @MainActor (Built, [RecordingToolbox.Call]) -> (Bool, String)
     }
 
     /// The harness's `structureCases` (Tools/VoiceBenchmarkHarness/Harness.swift, `structureCases`), with the same canvas
@@ -269,29 +322,31 @@ struct VoiceStructureLiveTests {
     static let cases: [Case] = [
         Case(command: "Put these in a column", design: .fieldsSelected, tool: "groupElements",
              isRight: { ["E8", "E9"].allSatisfy(($0["elements"] ?? "").contains) && ($0["as"] ?? "").lowercased().contains("column") },
-             isDone: { ($0.areAll(["email", "password"], in: .vertical), "the fields' container: \(describe($0.container(of: "email")))") }),
+             isDone: { built, _ in (built.areAll(["email", "password"], in: .vertical), "the fields' container: \(describe(built.container(of: "email")))") }),
         Case(command: "Make these a row", design: .fieldsSelected, tool: "groupElements",
              isRight: { ["E8", "E9"].allSatisfy(($0["elements"] ?? "").contains) && ($0["as"] ?? "").lowercased().contains("row") },
-             isDone: { ($0.areAll(["email", "password"], in: .horizontal), "the fields' container: \(describe($0.container(of: "email")))") }),
+             isDone: { built, _ in (built.areAll(["email", "password"], in: .horizontal), "the fields' container: \(describe(built.container(of: "email")))") }),
         Case(command: "Make the card a grid of two", tool: "setLayout", isRight: { arguments in
             let layout = (arguments["layout"] ?? "").lowercased()
             return arguments["target"] == "E2" && layout.contains("grid") && (layout.contains("2") || layout.contains("two"))
-        }, isDone: { built in
+        }, isDone: { built, _ in
             guard case .grid(let grid)? = built.node("card")?.layout else { return (false, "the card: \(describe(built.node("card")))") }
             return (grid.columns == 2, "the card: \(describe(built.node("card")))")
         }),
-        // More than the row's 12. Done is one step more, up to 48: a spacing raised again and again isn't what was asked.
+        // More than the row's 12. Done is one raise, in one call, to no more than 48: a spacing raised again and again
+        // isn't what was asked, wherever it ends.
         Case(command: "Space the row out more", tool: "setLayout", isRight: { arguments in
             let spacing = Double((arguments["spacing"] ?? "").filter { $0.isNumber || $0 == "." }) ?? 0
             let keepsTheRow = arguments["layout"].map { $0.lowercased().contains("row") } ?? true
             return arguments["target"] == "E5" && spacing > 12 && keepsTheRow
-        }, isDone: { built in
+        }, isDone: { built, calls in
+            let raises = calls.filter { $0.tool == "setLayout" && $0.arguments["spacing"] != nil }.count
             guard case .stack(let stack)? = built.node("row")?.layout, stack.axis == .horizontal else {
                 return (false, "the row: \(describe(built.node("row")))")
             }
-            return (stack.spacing > 12 && stack.spacing <= 48, "the row: \(describe(built.node("row")))")
+            return (raises == 1 && stack.spacing > 12 && stack.spacing <= 48, "the row: \(describe(built.node("row"))), \(raises) raises")
         }),
-        Case(command: "Ungroup the row", tool: "ungroup", isRight: { ($0["element"] ?? "").lowercased().contains("e5") }, isDone: { built in
+        Case(command: "Ungroup the row", tool: "ungroup", isRight: { ($0["element"] ?? "").lowercased().contains("e5") }, isDone: { built, _ in
             let free = built.node("row") == nil && built.container(of: "label") == nil && built.container(of: "toggle") == nil
             return (free, built.node("row") == nil ? "the row is gone" : "the row: \(describe(built.node("row")))")
         }),
@@ -300,17 +355,17 @@ struct VoiceStructureLiveTests {
             let before = !said.isDisjoint(with: ["before", "above", "left"])
             let after = !said.isDisjoint(with: ["after", "below", "under", "beneath", "underneath", "right"])
             return arguments["element"] == "E7" && arguments["target"] == "E6" && before && !after
-        }, isDone: { ($0.areAll(["toggle", "label"], in: .horizontal), "the row: \(describe($0.node("row")))") }),
+        }, isDone: { built, _ in (built.areAll(["toggle", "label"], in: .horizontal), "the row: \(describe(built.node("row")))") }),
         // Controls: one thing out of a row is moveElement's take-out, and a button in a column is resized as any is.
         Case(command: "Take the toggle out of the row", tool: "moveElement",
              isRight: { $0["element"] == "E7" && ["yes", "true", "y"].contains(($0["takeOut"] ?? "").lowercased()) },
-             isDone: { built in
+             isDone: { built, _ in
                  let out = built.node("toggle") != nil && built.container(of: "toggle")?.id != built.id("row")
                  return (out, out ? "the toggle is out of the row" : "the toggle is still in the row")
              }),
         Case(command: "Make the button half width", tool: "moveElement",
              isRight: { ($0["element"] ?? "").lowercased().contains("e11") && ($0["width"] ?? "").contains("50") },
-             isDone: { built in
+             isDone: { built, _ in
                  let width = built.store.ownFrame(built.id("button"))?.width ?? 0
                  return (abs(width - 196.5) <= 1, "the button is \(width) wide")
              }),
@@ -322,7 +377,7 @@ struct VoiceStructureLiveTests {
     static let stackControl = Case(
         command: "Stack the title, the button and the image into a column.", design: .login, tool: "stackElements",
         isRight: { ($0["direction"] ?? "").lowercased().contains("column") && ["E1", "E2", "E3"].allSatisfy(($0["elements"] ?? "").contains) },
-        isDone: { built in
+        isDone: { built, _ in
             if built.areAll(["title", "button", "image"], in: .vertical) { return (true, "the three are in a column") }
             let frames = ["title", "button", "image"].compactMap { built.store.ownFrame(built.id($0)) }.sorted { $0.minY < $1.minY }
             guard frames.count == 3 else { return (false, "not all three are there") }
@@ -405,6 +460,10 @@ struct VoiceStructureLiveTests {
         var failures: [String] = []
         var eight = Score()
         let asked = Self.cases.filter(Self.isAsked)
+        guard !asked.isEmpty || Self.isAsked(Self.stackControl) else {
+            Issue.record("TEST_RUNNER_LAYER_STRUCTURE_ONLY=\(Self.only ?? "") matches no case")
+            return
+        }
         for testCase in asked {
             eight.add(await scored(testCase, failures: &failures))
         }
@@ -477,7 +536,7 @@ struct VoiceStructureLiveTests {
                 calls = recorder.calls
                 said = "ERROR \(String(describing: error).prefix(160))"
             }
-            let (isDone, end) = testCase.isDone(built)
+            let (isDone, end) = testCase.isDone(built, calls)
             let isRightTool = calls.first?.tool == testCase.tool
             let isHarnessRight = isRightTool && calls.count == 1 && calls[0].arguments["unreadable"] == nil && testCase.isRight(calls[0].arguments)
             let isRight = isHarnessRight && isDone
